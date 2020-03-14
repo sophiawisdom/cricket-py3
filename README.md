@@ -1,3 +1,5 @@
+stolen from https://is.cuni.cz/webapps/zzp/detail/143329/?lang=en by Jakub Břečka. I was unable to find him to ask for permission so we're gonna go with it.
+
 === REQUIREMENTS ===
 
 0a. OS X 10.10 Yosemite, 10.11 El Capitan or newer.
