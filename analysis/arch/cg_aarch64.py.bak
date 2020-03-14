@@ -1,0 +1,430 @@
+from capstone.arm64_const import *
+from analysis.types import VoidType
+from analysis.ucode.ucode import *
+
+
+class CodeGenAArch64:
+
+    def __init__(self, function):
+        self.sema = function.arch.sema
+        self.arch = function.arch
+        self.function = function
+        self.ucode = []
+        self.bit_size = function.arch.bits
+        self.byte_size = function.arch.bits / 8
+
+    def emit(self, uinstr, instr):
+        uinstr.addr = instr.addr
+        uinstr.pc_value = instr.addr
+        self.ucode.append(uinstr)
+        return uinstr
+
+    def get_native_register(self, reg_name):
+        if reg_name == "xzr":
+            return UCodeConstant(8, 0)
+        return self.function.ufunction.get_native_register(reg_name)
+
+    def get_imm_value_from_operand(self, instr, op_idx, size):
+        assert len(instr.csinstr.operands) > op_idx
+        op = instr.csinstr.operands[op_idx]
+        assert op.type == ARM64_OP_IMM
+        return UCodeConstant(size, op.imm)
+
+    def get_reg_from_operand(self, instr, op_idx, size=8):
+        assert len(instr.csinstr.operands) > op_idx
+        op = instr.csinstr.operands[op_idx]
+        assert op.type == ARM64_OP_REG
+        reg_name = instr.csinstr.reg_name(op.reg)
+        if size == 8:
+            assert reg_name.startswith("x") or reg_name == "sp"
+            reg = self.get_native_register(reg_name)
+            return reg
+        elif size in [4, 2, 1]:
+            assert reg_name.startswith("w")
+            full_reg_name = reg_name.replace("w", "x")
+            full_reg = self.get_native_register(full_reg_name)
+            t = self.function.ufunction.create_temp_register(size)
+            self.emit(UCodeTruncate(size, full_reg, t), instr)
+            return t
+        else:
+            assert False
+
+    def set_reg_from_operand(self, instr, op_idx, value, size=8):
+        assert len(instr.csinstr.operands) > op_idx
+        op = instr.csinstr.operands[op_idx]
+        assert op.type == ARM64_OP_REG
+        reg_name = instr.csinstr.reg_name(op.reg)
+        if size == 8:
+            assert reg_name.startswith("x") or reg_name == "sp"
+            reg = self.get_native_register(reg_name)
+            self.emit(UCodeMov(reg.size, value, reg), instr)
+        elif size in [4, 2, 1]:
+            assert reg_name.startswith("w")
+            full_reg_name = reg_name.replace("w", "x")
+            full_reg = self.get_native_register(full_reg_name)
+            t = self.function.ufunction.create_temp_register(8)
+            self.emit(UCodeExtend(8, value, t), instr)
+            self.emit(UCodeMov(8, t, full_reg), instr)
+        else:
+            assert False
+
+    def get_ucode_from_operand(self, instr, op_idx, size=8):
+        assert len(instr.csinstr.operands) > op_idx
+        op = instr.csinstr.operands[op_idx]
+        if op.type == ARM64_OP_IMM: return self.get_imm_value_from_operand(instr, op_idx, size)
+        elif op.type == ARM64_OP_REG: return self.get_reg_from_operand(instr, op_idx, size)
+
+    def get_pointer_from_duo_operands(self, instr, op_idx1, op_idx2):
+        op1 = instr.csinstr.operands[op_idx1]
+        op2 = instr.csinstr.operands[op_idx2]
+
+        if op1.type == ARM64_OP_REG:
+            post_index_writeback = False
+            base_reg_name = instr.csinstr.reg_name(op1.reg)
+
+            assert op2.type == ARM64_OP_REG
+            disp_reg_name = instr.csinstr.reg_name(op2.reg)
+            assert disp_reg_name.startswith("x") or disp_reg_name == "sp"
+            disp_reg = self.get_native_register(disp_reg_name)
+        elif op1.type == ARM64_OP_MEM:
+            post_index_writeback = True
+            base_reg_name = instr.csinstr.reg_name(op1.mem.base)
+            op2 = instr.csinstr.operands[op_idx2]
+            assert op2.type == ARM64_OP_IMM
+            disp_reg = UCodeConstant(8, op2.imm)
+        else:
+            assert False
+
+        assert base_reg_name.startswith("x") or base_reg_name == "sp"
+        base_reg = self.get_native_register(base_reg_name)
+
+        if not post_index_writeback:
+            t = self.function.ufunction.create_temp_register(8)
+            self.emit(UCodeAdd(8, base_reg, disp_reg, t), instr)
+            return t
+        else:
+            t = self.function.ufunction.create_temp_register(8)
+            self.emit(UCodeMov(8, base_reg, t), instr)
+            self.emit(UCodeAdd(8, base_reg, disp_reg, base_reg), instr)
+            return t
+
+    def get_pointer_from_operand(self, instr, op_idx):
+        assert len(instr.csinstr.operands) > op_idx
+        op = instr.csinstr.operands[op_idx]
+        if op.type == ARM64_OP_REG:
+            # Bug in capstone? For "STR x1, [sp]" it says 2nd operand's type is "ARM64_OP_REG"
+            # Another bug? "STRB w2, [x0, x8]" says 2nd operand's type is "ARM64_OP_REG"???
+            base_reg_name = instr.csinstr.reg_name(op.reg)
+            assert ("[%s]" % base_reg_name) in instr.csinstr.op_str
+            base_reg = self.get_native_register(base_reg_name)
+            disp = UCodeConstant(8, 0)
+        elif op.type == ARM64_OP_MEM:
+            assert op.type == ARM64_OP_MEM
+            base_reg_name = instr.csinstr.reg_name(op.mem.base)
+            assert base_reg_name.startswith("x") or base_reg_name == "sp"
+            base_reg = self.get_native_register(base_reg_name)
+            disp = UCodeConstant(8, op.mem.disp)
+        elif op.type == ARM64_OP_IMM:
+            return UCodeConstant(8, op.imm)
+        t = self.function.ufunction.create_temp_register(8)
+        self.emit(UCodeAdd(8, base_reg, disp, t), instr)
+        return t
+
+    def register_size(self, cs_reg_num, instr):
+        reg_name = instr.csinstr.reg_name(cs_reg_num)
+        if reg_name.startswith("x") or reg_name == "sp": return 8
+        if reg_name.startswith("w"): return 4
+        assert False
+
+    def size_from_operand(self, instr, op_idx):
+        op = instr.csinstr.operands[op_idx]
+        assert op.type == ARM64_OP_REG
+        return self.register_size(op.reg, instr)
+
+    ARITHMETICS = {
+        ARM64_INS_ADD: UCodeAdd,
+        ARM64_INS_SUB: UCodeSub,
+        ARM64_INS_MUL: UCodeMul,
+        ARM64_INS_SDIV: UCodeDiv,
+        ARM64_INS_UDIV: UCodeDiv,
+        ARM64_INS_AND: UCodeAnd,
+        ARM64_INS_ORR: UCodeOr,
+        ARM64_INS_EOR: UCodeXor,
+        ARM64_INS_LSL: UCodeShiftLeft,
+        ARM64_INS_LSR: UCodeShiftRight,
+        ARM64_INS_ASR: UCodeShiftRight,
+    }
+
+    def arithmetic_instr_ids(self):
+        return self.ARITHMETICS.keys()
+
+    def arithmetic_ucode_op_for_id(self, id):
+        return self.ARITHMETICS[id]
+
+    def process_instruction(self, instr):
+        if instr.csinstr.id in [ARM64_INS_ADR, ARM64_INS_ADRP, ARM64_INS_MOV, ARM64_INS_MOVZ] and len(instr.csinstr.operands) == 2:
+            assert instr.csinstr.operands[0].type == ARM64_OP_REG
+            size = self.register_size(instr.csinstr.operands[0].reg, instr)
+            src = self.get_ucode_from_operand(instr, 1, size)
+            self.set_reg_from_operand(instr, 0, src, size)
+            return
+        elif instr.csinstr.id in self.arithmetic_instr_ids() and len(instr.csinstr.operands) == 3:
+            op = self.arithmetic_ucode_op_for_id(instr.csinstr.id)
+            assert instr.csinstr.operands[0].type == ARM64_OP_REG
+            size = self.register_size(instr.csinstr.operands[0].reg, instr)
+            src1 = self.get_ucode_from_operand(instr, 1, size)
+            src2 = self.get_ucode_from_operand(instr, 2, size)
+            t = self.function.ufunction.create_temp_register(size)
+            self.emit(op(size, src1, src2, t), instr)
+            self.set_reg_from_operand(instr, 0, t, size=size)
+            return
+        elif instr.csinstr.id in [ARM64_INS_NEG] and len(instr.csinstr.operands) == 2:
+            op = UCodeNeg
+            assert instr.csinstr.operands[0].type == ARM64_OP_REG
+            size = self.register_size(instr.csinstr.operands[0].reg, instr)
+            src1 = self.get_ucode_from_operand(instr, 1, size)
+            src2 = UCodeConstant(size, 0)  # Fake, None.
+            t = self.function.ufunction.create_temp_register(size)
+            self.emit(op(size, src1, src2, t), instr)
+            self.set_reg_from_operand(instr, 0, t, size=size)
+            return
+        elif instr.csinstr.id in [ARM64_INS_MADD, ARM64_INS_MSUB] and len(instr.csinstr.operands) == 4:
+            op2 = UCodeAdd if instr.csinstr.id == ARM64_INS_MADD else UCodeSub
+            assert instr.csinstr.operands[0].type == ARM64_OP_REG
+            size = self.register_size(instr.csinstr.operands[0].reg, instr)
+            src1 = self.get_ucode_from_operand(instr, 1, size)
+            src2 = self.get_ucode_from_operand(instr, 2, size)
+            src3 = self.get_ucode_from_operand(instr, 3, size)
+            t = self.function.ufunction.create_temp_register(size)
+            self.emit(UCodeMul(size, src1, src2, t), instr)
+            t2 = self.function.ufunction.create_temp_register(size)
+            self.emit(op2(size, src3, t, t2), instr)
+            self.set_reg_from_operand(instr, 0, t2, size=size)
+            return
+        elif instr.csinstr.id in [ARM64_INS_STR, ARM64_INS_STUR] and len(instr.csinstr.operands) == 2:
+            size = self.size_from_operand(instr, 0)
+            ptr = self.get_pointer_from_operand(instr, 1)
+            src = self.get_reg_from_operand(instr, 0, size)
+            self.emit(UCodeStore(size, ptr, src), instr)
+            return
+        elif instr.csinstr.id in [ARM64_INS_STR, ARM64_INS_STUR] and len(instr.csinstr.operands) == 3:
+            ptr = self.get_pointer_from_duo_operands(instr, 1, 2)
+            src = self.get_reg_from_operand(instr, 0)
+            self.emit(UCodeStore(8, ptr, src), instr)
+            return
+        elif instr.csinstr.id in [ARM64_INS_LDR, ARM64_INS_LDUR] and len(instr.csinstr.operands) == 2:
+            size = self.size_from_operand(instr, 0)
+            dst = self.get_reg_from_operand(instr, 0, size)
+            ptr = self.get_pointer_from_operand(instr, 1)
+            self.emit(UCodeLoad(8, ptr, dst), instr)
+            return
+        elif instr.csinstr.id in [ARM64_INS_LDR, ARM64_INS_LDUR] and len(instr.csinstr.operands) == 3:
+            size = self.size_from_operand(instr, 0)
+            dst = self.get_reg_from_operand(instr, 0, size)
+            ptr = self.get_pointer_from_duo_operands(instr, 1, 2)
+            self.emit(UCodeLoad(8, ptr, dst), instr)
+            return
+        elif instr.csinstr.id in [ARM64_INS_STRB] and len(instr.csinstr.operands) == 2:
+            ptr = self.get_pointer_from_operand(instr, 1)
+            src = self.get_reg_from_operand(instr, op_idx=0, size=1)
+            self.emit(UCodeStore(1, ptr, src), instr)
+            return
+        elif instr.csinstr.id in [ARM64_INS_STRB] and len(instr.csinstr.operands) == 3:
+            ptr = self.get_pointer_from_duo_operands(instr, 1, 2)
+            src = self.get_reg_from_operand(instr, op_idx=0, size=1)
+            self.emit(UCodeStore(1, ptr, src), instr)
+            return
+        elif instr.csinstr.id in [ARM64_INS_LDRB] and len(instr.csinstr.operands) == 2:
+            ptr = self.get_pointer_from_operand(instr, 1)
+            t = self.function.ufunction.create_temp_register(1)
+            self.emit(UCodeLoad(1, ptr, t), instr)
+            self.set_reg_from_operand(instr, op_idx=0, value=t, size=1)
+            return
+        elif instr.csinstr.id in [ARM64_INS_LDRB] and len(instr.csinstr.operands) == 3:
+            ptr = self.get_pointer_from_duo_operands(instr, 1, 2)
+            t = self.function.ufunction.create_temp_register(1)
+            self.emit(UCodeLoad(1, ptr, t), instr)
+            self.set_reg_from_operand(instr, op_idx=0, value=t, size=1)
+            return
+        elif instr.csinstr.id in [ARM64_INS_LDRSW] and len(instr.csinstr.operands) == 2:
+            ptr = self.get_pointer_from_operand(instr, 1)
+            dst = self.get_reg_from_operand(instr, 0)
+            t = self.function.ufunction.create_temp_register(4)
+            self.emit(UCodeLoad(4, ptr, t), instr)
+            self.emit(UCodeExtend(8, t, dst), instr)
+            return
+        elif instr.csinstr.id in [ARM64_INS_STP] and len(instr.csinstr.operands) == 3:
+            assert instr.csinstr.operands[0].type == ARM64_OP_REG
+            size = self.register_size(instr.csinstr.operands[0].reg, instr)
+            ptr = self.get_pointer_from_operand(instr, 2)
+            src1 = self.get_reg_from_operand(instr, 0, size)
+            src2 = self.get_reg_from_operand(instr, 1, size)
+            self.emit(UCodeStore(size, ptr, src1), instr)
+            t = self.function.ufunction.create_temp_register(8)
+            self.emit(UCodeAdd(8, ptr, UCodeConstant(8, size), t), instr)
+            self.emit(UCodeStore(size, t, src2), instr)
+            return
+        elif instr.csinstr.id in [ARM64_INS_LDP] and len(instr.csinstr.operands) in [3, 4]:
+            assert instr.csinstr.operands[0].type == ARM64_OP_REG
+            size = self.register_size(instr.csinstr.operands[0].reg, instr)
+            if len(instr.csinstr.operands) == 3:
+                ptr = self.get_pointer_from_operand(instr, 2)
+            else:
+                ptr = self.get_pointer_from_duo_operands(instr, 2, 3)
+            dst1 = self.get_reg_from_operand(instr, 0, size)
+            dst2 = self.get_reg_from_operand(instr, 1, size)
+            self.emit(UCodeLoad(size, ptr, dst1), instr)
+            t = self.function.ufunction.create_temp_register(8)
+            self.emit(UCodeAdd(8, ptr, UCodeConstant(8, size), t), instr)
+            self.emit(UCodeLoad(size, t, dst2), instr)
+            return
+        elif instr.csinstr.id == ARM64_INS_NOP:
+            self.emit(UCodeNop(), instr)
+            return
+        elif instr.csinstr.id == ARM64_INS_BL and len(instr.csinstr.operands) == 1:
+            assert instr.csinstr.cc == ARM64_CC_INVALID
+            value = self.get_imm_value_from_operand(instr, 0, 8)
+            dst = self.get_native_register(self.sema.retval_location(self.function.binary.types.get("long")))
+            self.emit(UCodeCall(value, dst, []), instr)
+            return
+        elif instr.csinstr.id == ARM64_INS_B and len(instr.csinstr.operands) == 1:
+            cond = self.ucode_for_condition(instr)
+            value = self.get_imm_value_from_operand(instr, 0, 8)
+            self.emit(UCodeBranch(value, cond), instr)
+            return
+        elif instr.csinstr.id == ARM64_INS_BR and len(instr.csinstr.operands) == 1:
+            reg = self.get_reg_from_operand(instr, 0, 8)
+            assert instr.jump_table is not None
+            self.emit(UCodeSwitch(instr.jump_table, reg), instr)
+            return
+        elif instr.csinstr.id == ARM64_INS_RET and len(instr.csinstr.operands) == 0:
+            args = []
+            if not isinstance(self.function.returns.type, VoidType):
+                args = [self.get_native_register(self.sema.retval_location(self.function.returns.type))]
+            self.emit(UCodeRet(args), instr)
+            return
+
+        elif instr.csinstr.id in [ARM64_INS_CBZ, ARM64_INS_CBNZ]:
+            size = self.size_from_operand(instr, 0)
+            reg = self.get_reg_from_operand(instr, 0, size)
+            self.emit(UCodeSetFlag(self.zf(), UCodeSetFlag.TYPE_ZERO, reg, None, UCodeSetFlag.OPERATION_NONE), instr)
+            if instr.csinstr.id == ARM64_INS_CBZ:
+                self.emit(UCodeMov(1, self.zf(), self.bc()), instr)
+            else:
+                self.emit(UCodeNeg(1, self.zf(), UCodeConstant(1, 0), self.bc()), instr)
+            target = self.get_ucode_from_operand(instr, 1)
+            self.emit(UCodeBranch(target, self.bc()), instr)
+            return
+
+        elif instr.csinstr.id in [ARM64_INS_TBZ, ARM64_INS_TBNZ]:
+            reg = self.get_ucode_from_operand(instr, 0)
+            assert instr.csinstr.operands[1].type == ARM64_OP_IMM
+            imm = instr.csinstr.operands[1].imm
+            target = self.get_ucode_from_operand(instr, 2)
+            bit_pattern = 1 << imm
+            t = self.function.ufunction.create_temp_register(8)
+            self.emit(UCodeAnd(8, reg, UCodeConstant(8, bit_pattern), t), instr)
+            t2 = self.function.ufunction.create_temp_register(1)
+            self.emit(UCodeSetFlag(t2, UCodeSetFlag.TYPE_ZERO, t, None, UCodeSetFlag.OPERATION_NONE), instr)
+            if instr.csinstr.id == ARM64_INS_TBZ:
+                self.emit(UCodeMov(1, self.zf(), self.bc()), instr)
+            else:
+                self.emit(UCodeNeg(1, self.zf(), UCodeConstant(1, 0), self.bc()), instr)
+            self.emit(UCodeBranch(target, self.bc()), instr)
+            return
+
+        elif instr.csinstr.id == ARM64_INS_CMP:
+            size = self.size_from_operand(instr, 0)
+            src1 = self.get_ucode_from_operand(instr, 0, size)
+            src2 = self.get_ucode_from_operand(instr, 1, size)
+            return self.emit_flags(instr, src1, src2, UCodeSetFlag.OPERATION_SUB)
+
+        elif instr.csinstr.id == ARM64_INS_TST:
+            src1 = self.get_ucode_from_operand(instr, 0)
+            src2 = self.get_ucode_from_operand(instr, 1)
+            return self.emit_flags(instr, src1, src2, UCodeSetFlag.OPERATION_AND)
+
+        self.emit(UCodeAsm(instr), instr)
+
+    def emit_flags(self, instr, src1, src2, uflag_op):
+        self.emit(UCodeSetFlag(self.zf(), UCodeSetFlag.TYPE_ZERO, src1, src2, uflag_op), instr)
+        self.emit(UCodeSetFlag(self.cf(), UCodeSetFlag.TYPE_CARRY, src1, src2, uflag_op), instr)
+        self.emit(UCodeSetFlag(self.nf(), UCodeSetFlag.TYPE_SIGN, src1, src2, uflag_op), instr)
+        self.emit(UCodeSetFlag(self.vf(), UCodeSetFlag.TYPE_OVERFLOW, src1, src2, uflag_op), instr)
+
+    def ucode_for_condition(self, instr):
+        if instr.csinstr.cc in [ARM64_CC_INVALID, ARM64_CC_AL, ARM64_CC_NV]:
+            self.emit(UCodeMov(1, UCodeConstant(1, 1), self.bc()), instr)
+            return self.bc()
+        elif instr.csinstr.cc == ARM64_CC_EQ:
+            self.emit(UCodeMov(1, self.zf(), self.bc()), instr)
+            return self.bc()
+        elif instr.csinstr.cc == ARM64_CC_NE:
+            self.emit(UCodeNeg(1, self.zf(), UCodeConstant(1, 0), self.bc()), instr)
+            return self.bc()
+        elif instr.csinstr.cc == ARM64_CC_HS:
+            self.emit(UCodeMov(1, self.cf(), self.bc()), instr)
+            return self.bc()
+        elif instr.csinstr.cc == ARM64_CC_LO:
+            self.emit(UCodeNeg(1, self.cf(), UCodeConstant(1, 0), self.bc()), instr)
+            return self.bc()
+        elif instr.csinstr.cc == ARM64_CC_MI:
+            self.emit(UCodeMov(1, self.nf(), self.bc()), instr)
+            return self.bc()
+        elif instr.csinstr.cc == ARM64_CC_PL:
+            self.emit(UCodeNeg(1, self.nf(), UCodeConstant(1, 0), self.bc()), instr)
+            return self.bc()
+        elif instr.csinstr.cc == ARM64_CC_VS:
+            self.emit(UCodeMov(1, self.vf(), self.bc()), instr)
+            return self.bc()
+        elif instr.csinstr.cc == ARM64_CC_VC:
+            self.emit(UCodeNeg(1, self.vf(), UCodeConstant(1, 0), self.bc()), instr)
+            return self.bc()
+        elif instr.csinstr.cc == ARM64_CC_HI:
+            t1 = self.function.ufunction.create_temp_register(1)
+            t2 = self.function.ufunction.create_temp_register(1)
+            self.emit(UCodeNeg(1, self.zf(), UCodeConstant(1, 0), t1), instr)
+            self.emit(UCodeAnd(1, self.cf(), t1, self.bc()), instr)
+            return self.bc()
+        elif instr.csinstr.cc == ARM64_CC_LS:
+            t1 = self.function.ufunction.create_temp_register(1)
+            self.emit(UCodeNeg(1, t1, self.cf(), t1), instr)
+            self.emit(UCodeOr(1, t1, self.zf(), self.bc()), instr)
+            return self.bc()
+        elif instr.csinstr.cc == ARM64_CC_GE:
+            self.emit(UCodeEquals(1, self.nf(), self.vf(), self.bc()), instr)
+            return self.bc()
+        elif instr.csinstr.cc == ARM64_CC_LT:
+            t = self.function.ufunction.create_temp_register(1)
+            self.emit(UCodeEquals(1, self.nf(), self.vf(), t), instr)
+            self.emit(UCodeNeg(1, t, UCodeConstant(1, 0), self.bc()), instr)
+            return self.bc()
+        elif instr.csinstr.cc == ARM64_CC_GT:
+            t1 = self.function.ufunction.create_temp_register(1)
+            self.emit(UCodeNeg(1, self.zf(), UCodeConstant(1, 0), t1), instr)
+            t2 = self.function.ufunction.create_temp_register(1)
+            self.emit(UCodeEquals(1, self.nf(), self.vf(), t2), instr)
+            self.emit(UCodeAnd(1, t1, t2, self.bc()), instr)
+            return self.bc()
+        elif instr.csinstr.cc == ARM64_CC_LE:
+            t1 = self.zf()
+            t2 = self.function.ufunction.create_temp_register(1)
+            self.emit(UCodeEquals(1, self.nf(), self.vf(), t2), instr)
+            self.emit(UCodeNeg(1, t2, UCodeConstant(1, 0), t2), instr)
+            self.emit(UCodeOr(1, t1, t2, self.bc()), instr)
+            return self.bc()
+
+        assert False, "Invalid AArch64 conditional code."
+
+    def flag_register(self, name):
+        return self.function.ufunction.get_flag_register(name)
+
+    def zf(self): return self.flag_register("zf")
+    def cf(self): return self.flag_register("cf")
+    def nf(self): return self.flag_register("nf")
+    def vf(self): return self.flag_register("vf")
+
+    def bc(self): return self.function.ufunction.get_custom_register("branch_condition", 1)
+
+    def get_ucode(self):
+        return self.ucode

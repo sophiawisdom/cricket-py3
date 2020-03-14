@@ -1,0 +1,1453 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>963</width>
+    <height>663</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QHBoxLayout" name="horizontalLayout_3">
+    <property name="leftMargin">
+     <number>0</number>
+    </property>
+    <property name="topMargin">
+     <number>4</number>
+    </property>
+    <property name="rightMargin">
+     <number>0</number>
+    </property>
+    <property name="bottomMargin">
+     <number>0</number>
+    </property>
+    <item>
+     <widget class="QSplitter" name="splitter">
+      <property name="orientation">
+       <enum>Qt::Horizontal</enum>
+      </property>
+      <widget class="QWidget" name="verticalLayoutWidget">
+       <layout class="QVBoxLayout" name="verticalLayout">
+        <property name="spacing">
+         <number>3</number>
+        </property>
+        <property name="leftMargin">
+         <number>1</number>
+        </property>
+        <property name="topMargin">
+         <number>1</number>
+        </property>
+        <property name="rightMargin">
+         <number>1</number>
+        </property>
+        <property name="bottomMargin">
+         <number>1</number>
+        </property>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout">
+          <item>
+           <widget class="QToolButton" name="listSwitchClasses">
+            <property name="text">
+             <string>Classes</string>
+            </property>
+            <property name="icon">
+             <iconset resource="icons/letters.qrc">
+              <normaloff>:/letters/c.svg</normaloff>:/letters/c.svg</iconset>
+            </property>
+            <property name="checkable">
+             <bool>true</bool>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+            <property name="toolButtonStyle">
+             <enum>Qt::ToolButtonTextUnderIcon</enum>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="listSwitchFunctions">
+            <property name="text">
+             <string>Functions</string>
+            </property>
+            <property name="icon">
+             <iconset resource="icons/letters.qrc">
+              <normaloff>:/letters/f.svg</normaloff>:/letters/f.svg</iconset>
+            </property>
+            <property name="checkable">
+             <bool>true</bool>
+            </property>
+            <property name="toolButtonStyle">
+             <enum>Qt::ToolButtonTextUnderIcon</enum>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="listSwitchBlocks">
+            <property name="text">
+             <string>Blocks</string>
+            </property>
+            <property name="icon">
+             <iconset resource="icons/letters.qrc">
+              <normaloff>:/letters/b.svg</normaloff>:/letters/b.svg</iconset>
+            </property>
+            <property name="checkable">
+             <bool>true</bool>
+            </property>
+            <property name="toolButtonStyle">
+             <enum>Qt::ToolButtonTextUnderIcon</enum>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QStackedWidget" name="stackedWidget">
+          <property name="currentIndex">
+           <number>2</number>
+          </property>
+          <widget class="QWidget" name="pageClasses">
+           <layout class="QVBoxLayout" name="verticalLayout_4">
+            <property name="leftMargin">
+             <number>5</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>5</number>
+            </property>
+            <item>
+             <layout class="QVBoxLayout" name="verticalLayout_2">
+              <property name="spacing">
+               <number>6</number>
+              </property>
+              <property name="bottomMargin">
+               <number>0</number>
+              </property>
+              <item>
+               <widget class="QCheckBox" name="showExternalClassesCheckbox">
+                <property name="text">
+                 <string>Show external classes</string>
+                </property>
+                <property name="checked">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QCheckBox" name="classListFlatViewCheckbox">
+                <property name="text">
+                 <string>Flat view</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <widget class="MyTreeWidget" name="classesTreeWidget">
+              <property name="maximumSize">
+               <size>
+                <width>16777215</width>
+                <height>16777215</height>
+               </size>
+              </property>
+              <property name="baseSize">
+               <size>
+                <width>0</width>
+                <height>0</height>
+               </size>
+              </property>
+              <property name="alternatingRowColors">
+               <bool>true</bool>
+              </property>
+              <property name="verticalScrollMode">
+               <enum>QAbstractItemView::ScrollPerPixel</enum>
+              </property>
+              <attribute name="headerVisible">
+               <bool>false</bool>
+              </attribute>
+              <column>
+               <property name="text">
+                <string notr="true">Name</string>
+               </property>
+              </column>
+              <item>
+               <property name="text">
+                <string>AppDelegate</string>
+               </property>
+               <property name="icon">
+                <iconset resource="icons/letters.qrc">
+                 <normaloff>:/letters/c.svg</normaloff>:/letters/c.svg</iconset>
+               </property>
+               <item>
+                <property name="text">
+                 <string>method:</string>
+                </property>
+                <property name="icon">
+                 <iconset>
+                  <normaloff>:/tango/m.svg</normaloff>:/tango/m.svg</iconset>
+                </property>
+               </item>
+              </item>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          <widget class="QWidget" name="pageFunctions">
+           <layout class="QVBoxLayout" name="verticalLayout_6">
+            <property name="leftMargin">
+             <number>5</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>5</number>
+            </property>
+            <item>
+             <layout class="QVBoxLayout" name="verticalLayout_5">
+              <property name="spacing">
+               <number>6</number>
+              </property>
+              <property name="bottomMargin">
+               <number>0</number>
+              </property>
+              <item>
+               <widget class="QCheckBox" name="checkBox_3">
+                <property name="text">
+                 <string>Show external functions</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <widget class="QTreeWidget" name="functionsTreeWidget">
+              <property name="maximumSize">
+               <size>
+                <width>16777215</width>
+                <height>16777215</height>
+               </size>
+              </property>
+              <property name="baseSize">
+               <size>
+                <width>0</width>
+                <height>0</height>
+               </size>
+              </property>
+              <property name="alternatingRowColors">
+               <bool>true</bool>
+              </property>
+              <property name="verticalScrollMode">
+               <enum>QAbstractItemView::ScrollPerPixel</enum>
+              </property>
+              <attribute name="headerVisible">
+               <bool>false</bool>
+              </attribute>
+              <column>
+               <property name="text">
+                <string notr="true">Name</string>
+               </property>
+              </column>
+              <item>
+               <property name="text">
+                <string>_classic_c_function_O0</string>
+               </property>
+               <property name="icon">
+                <iconset resource="icons/letters.qrc">
+                 <normaloff>:/letters/f.svg</normaloff>:/letters/f.svg</iconset>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>+[MyClass_O0 staticConstructor]</string>
+               </property>
+               <property name="icon">
+                <iconset resource="icons/letters.qrc">
+                 <normaloff>:/letters/m.svg</normaloff>:/letters/m.svg</iconset>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>-[MyClass_O0 gcdWithNumber:andNumber:]</string>
+               </property>
+               <property name="icon">
+                <iconset resource="icons/letters.qrc">
+                 <normaloff>:/letters/m.svg</normaloff>:/letters/m.svg</iconset>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>___20-[MyClass_O0 blocks]_block_invoke</string>
+               </property>
+               <property name="icon">
+                <iconset resource="icons/letters.qrc">
+                 <normaloff>:/letters/b.svg</normaloff>:/letters/b.svg</iconset>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>_main</string>
+               </property>
+               <property name="icon">
+                <iconset resource="icons/letters.qrc">
+                 <normaloff>:/letters/f.svg</normaloff>:/letters/f.svg</iconset>
+               </property>
+              </item>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          <widget class="QWidget" name="pageBlocks">
+           <layout class="QVBoxLayout" name="verticalLayout_12">
+            <property name="leftMargin">
+             <number>5</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>5</number>
+            </property>
+            <item>
+             <widget class="QTreeWidget" name="blocksTreeWidget">
+              <property name="maximumSize">
+               <size>
+                <width>16777215</width>
+                <height>16777215</height>
+               </size>
+              </property>
+              <property name="baseSize">
+               <size>
+                <width>0</width>
+                <height>0</height>
+               </size>
+              </property>
+              <property name="alternatingRowColors">
+               <bool>true</bool>
+              </property>
+              <property name="verticalScrollMode">
+               <enum>QAbstractItemView::ScrollPerPixel</enum>
+              </property>
+              <attribute name="headerVisible">
+               <bool>false</bool>
+              </attribute>
+              <column>
+               <property name="text">
+                <string notr="true">Name</string>
+               </property>
+              </column>
+              <item>
+               <property name="text">
+                <string>_classic_c_function_O0</string>
+               </property>
+               <property name="icon">
+                <iconset resource="icons/letters.qrc">
+                 <normaloff>:/letters/f.svg</normaloff>:/letters/f.svg</iconset>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>+[MyClass_O0 staticConstructor]</string>
+               </property>
+               <property name="icon">
+                <iconset resource="icons/letters.qrc">
+                 <normaloff>:/letters/m.svg</normaloff>:/letters/m.svg</iconset>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>-[MyClass_O0 gcdWithNumber:andNumber:]</string>
+               </property>
+               <property name="icon">
+                <iconset resource="icons/letters.qrc">
+                 <normaloff>:/letters/m.svg</normaloff>:/letters/m.svg</iconset>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>___20-[MyClass_O0 blocks]_block_invoke</string>
+               </property>
+               <property name="icon">
+                <iconset resource="icons/letters.qrc">
+                 <normaloff>:/letters/b.svg</normaloff>:/letters/b.svg</iconset>
+               </property>
+              </item>
+              <item>
+               <property name="text">
+                <string>_main</string>
+               </property>
+               <property name="icon">
+                <iconset resource="icons/letters.qrc">
+                 <normaloff>:/letters/f.svg</normaloff>:/letters/f.svg</iconset>
+               </property>
+              </item>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QTabWidget" name="tabWidget">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+         <horstretch>1</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>300</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="tabShape">
+        <enum>QTabWidget::Rounded</enum>
+       </property>
+       <property name="currentIndex">
+        <number>0</number>
+       </property>
+       <property name="documentMode">
+        <bool>false</bool>
+       </property>
+       <widget class="QWidget" name="classDumpTab">
+        <attribute name="title">
+         <string>Class Dump</string>
+        </attribute>
+        <layout class="QHBoxLayout" name="horizontalLayout_4">
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="QTextEdit" name="classDumpTextEdit">
+           <property name="textInteractionFlags">
+            <set>Qt::TextSelectableByKeyboard|Qt::TextSelectableByMouse</set>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="disassemblyTab">
+        <attribute name="title">
+         <string>Disassembly</string>
+        </attribute>
+        <layout class="QHBoxLayout" name="horizontalLayout_6">
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="QTextEdit" name="disassemblyTextEdit">
+           <property name="textInteractionFlags">
+            <set>Qt::TextSelectableByKeyboard|Qt::TextSelectableByMouse</set>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="basicBlocksTab">
+        <attribute name="title">
+         <string>Basic Blocks</string>
+        </attribute>
+        <layout class="QHBoxLayout" name="horizontalLayout_7">
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="QScrollArea" name="basicBlocksScrollArea">
+           <property name="verticalScrollBarPolicy">
+            <enum>Qt::ScrollBarAlwaysOn</enum>
+           </property>
+           <property name="widgetResizable">
+            <bool>true</bool>
+           </property>
+           <widget class="QWidget" name="basicBlocksContent">
+            <property name="geometry">
+             <rect>
+              <x>0</x>
+              <y>0</y>
+              <width>633</width>
+              <height>525</height>
+             </rect>
+            </property>
+            <layout class="QVBoxLayout" name="verticalLayout_3">
+             <property name="spacing">
+              <number>0</number>
+             </property>
+             <property name="sizeConstraint">
+              <enum>QLayout::SetMinimumSize</enum>
+             </property>
+             <property name="leftMargin">
+              <number>0</number>
+             </property>
+             <property name="topMargin">
+              <number>0</number>
+             </property>
+             <property name="rightMargin">
+              <number>0</number>
+             </property>
+             <property name="bottomMargin">
+              <number>0</number>
+             </property>
+            </layout>
+           </widget>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="uCodeTab">
+        <attribute name="title">
+         <string>µCode</string>
+        </attribute>
+        <layout class="QHBoxLayout" name="horizontalLayout_8">
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="QTextEdit" name="uCodeTextEdit">
+           <property name="textInteractionFlags">
+            <set>Qt::TextSelectableByKeyboard|Qt::TextSelectableByMouse</set>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="cfgTab">
+        <attribute name="title">
+         <string>CFG</string>
+        </attribute>
+        <layout class="QHBoxLayout" name="horizontalLayout_10">
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="QScrollArea" name="cfgScrollArea">
+           <property name="verticalScrollBarPolicy">
+            <enum>Qt::ScrollBarAlwaysOn</enum>
+           </property>
+           <property name="widgetResizable">
+            <bool>true</bool>
+           </property>
+           <widget class="QWidget" name="cfgContent">
+            <property name="geometry">
+             <rect>
+              <x>0</x>
+              <y>0</y>
+              <width>633</width>
+              <height>525</height>
+             </rect>
+            </property>
+            <layout class="QVBoxLayout" name="verticalLayout_7">
+             <property name="spacing">
+              <number>0</number>
+             </property>
+             <property name="sizeConstraint">
+              <enum>QLayout::SetMinimumSize</enum>
+             </property>
+             <property name="leftMargin">
+              <number>0</number>
+             </property>
+             <property name="topMargin">
+              <number>0</number>
+             </property>
+             <property name="rightMargin">
+              <number>0</number>
+             </property>
+             <property name="bottomMargin">
+              <number>0</number>
+             </property>
+            </layout>
+           </widget>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="sourceTab">
+        <attribute name="title">
+         <string>Source</string>
+        </attribute>
+        <layout class="QHBoxLayout" name="horizontalLayout_11">
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="QTextEdit" name="sourceTextEdit">
+           <property name="textInteractionFlags">
+            <set>Qt::TextSelectableByKeyboard|Qt::TextSelectableByMouse</set>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </widget>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>963</width>
+     <height>22</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title">
+     <string>File</string>
+    </property>
+    <addaction name="actionClose"/>
+    <addaction name="actionOpen"/>
+   </widget>
+   <widget class="QMenu" name="menuEdit">
+    <property name="title">
+     <string>Edit</string>
+    </property>
+    <addaction name="actionUndo"/>
+    <addaction name="actionRedo"/>
+    <addaction name="separator"/>
+    <addaction name="actionDisable_Undo_Redo"/>
+   </widget>
+   <widget class="QMenu" name="menuNavigate">
+    <property name="title">
+     <string>Navigate</string>
+    </property>
+    <addaction name="actionGo_Back"/>
+    <addaction name="actionGo_Forward"/>
+   </widget>
+   <widget class="QMenu" name="menuActions">
+    <property name="title">
+     <string>Actions</string>
+    </property>
+    <addaction name="actionAuto"/>
+    <addaction name="separator"/>
+    <addaction name="actionPropagate"/>
+    <addaction name="actionEliminate"/>
+    <addaction name="actionApply_ARC"/>
+    <addaction name="actionDetect_Patterns"/>
+    <addaction name="actionResolve_Symbols"/>
+    <addaction name="actionGenerate_Basic_Blocks"/>
+    <addaction name="actionGenerate_uCode"/>
+    <addaction name="actionGenerate_Source"/>
+    <addaction name="actionGenerate_CFG"/>
+    <addaction name="actionStrip_NOPs"/>
+    <addaction name="actionRemove_Unreachable_Basic_Blocks"/>
+    <addaction name="actionSimplify"/>
+    <addaction name="actionDe_Spill"/>
+   </widget>
+   <widget class="QMenu" name="menuInstruction">
+    <property name="title">
+     <string>Instruction</string>
+    </property>
+    <addaction name="actionMove_Up"/>
+    <addaction name="actionMove_Down"/>
+    <addaction name="actionRemove_Instruction"/>
+    <addaction name="separator"/>
+    <addaction name="actionPropagate_Instruction"/>
+    <addaction name="actionFold_Constants_on_Instruction"/>
+    <addaction name="actionDead_Code_Elimination_on_Instruction"/>
+   </widget>
+   <widget class="QMenu" name="menuView">
+    <property name="title">
+     <string>View</string>
+    </property>
+    <addaction name="actionShow_Def_Use_Chains"/>
+    <addaction name="actionShow_uCode_Generation_Details"/>
+   </widget>
+   <widget class="QMenu" name="menuCFG">
+    <property name="title">
+     <string>CFG</string>
+    </property>
+    <addaction name="actionMatch_If"/>
+    <addaction name="actionMatch_If_Else"/>
+    <addaction name="actionMatch_Sequence"/>
+    <addaction name="actionMatch_While"/>
+    <addaction name="actionMatch_Single_BB_While"/>
+    <addaction name="actionMatch_Do_While"/>
+    <addaction name="actionMatch_Early_Return"/>
+    <addaction name="actionMatch_Multi_If"/>
+    <addaction name="actionMatch_Infinite_Loop"/>
+    <addaction name="actionMatch_Switch"/>
+    <addaction name="actionDuplicate_Exit_Node"/>
+   </widget>
+   <widget class="QMenu" name="menuSource">
+    <property name="title">
+     <string>Source</string>
+    </property>
+    <addaction name="actionRewrite_Ivar_Loads"/>
+    <addaction name="actionRewrite_Ivar_Stores"/>
+    <addaction name="actionRewrite_objc_msgSend"/>
+    <addaction name="actionEmbed_Blocks"/>
+    <addaction name="actionSimplify_Source"/>
+    <addaction name="actionFix_Types"/>
+   </widget>
+   <widget class="QMenu" name="menuHelp">
+    <property name="title">
+     <string>Help</string>
+    </property>
+    <addaction name="actionHelp"/>
+    <addaction name="separator"/>
+    <addaction name="actionStart_profiling"/>
+    <addaction name="actionStop_profiling"/>
+    <addaction name="actionPrint_profiling_stats"/>
+   </widget>
+   <addaction name="menuFile"/>
+   <addaction name="menuEdit"/>
+   <addaction name="menuView"/>
+   <addaction name="menuNavigate"/>
+   <addaction name="menuActions"/>
+   <addaction name="menuInstruction"/>
+   <addaction name="menuCFG"/>
+   <addaction name="menuSource"/>
+   <addaction name="menuHelp"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar">
+   <property name="styleSheet">
+    <string notr="true">QStatusBar { border-top: 1px solid #ccc; }</string>
+   </property>
+   <property name="sizeGripEnabled">
+    <bool>true</bool>
+   </property>
+  </widget>
+  <widget class="QToolBar" name="mainToolBar">
+   <property name="font">
+    <font>
+     <pointsize>9</pointsize>
+    </font>
+   </property>
+   <property name="windowTitle">
+    <string>toolBar</string>
+   </property>
+   <property name="movable">
+    <bool>false</bool>
+   </property>
+   <property name="toolButtonStyle">
+    <enum>Qt::ToolButtonTextUnderIcon</enum>
+   </property>
+   <property name="floatable">
+    <bool>false</bool>
+   </property>
+   <attribute name="toolBarArea">
+    <enum>TopToolBarArea</enum>
+   </attribute>
+   <attribute name="toolBarBreak">
+    <bool>false</bool>
+   </attribute>
+   <addaction name="actionOpen"/>
+   <addaction name="separator"/>
+   <addaction name="actionGo_Back"/>
+   <addaction name="actionGo_Forward"/>
+   <addaction name="separator"/>
+   <addaction name="actionUndo"/>
+   <addaction name="actionRedo"/>
+   <addaction name="separator"/>
+   <addaction name="actionAuto"/>
+   <addaction name="actionGenerate_Basic_Blocks"/>
+   <addaction name="actionGenerate_uCode"/>
+   <addaction name="actionGenerate_Source"/>
+   <addaction name="actionGenerate_CFG"/>
+   <addaction name="separator"/>
+   <addaction name="actionStrip_NOPs"/>
+   <addaction name="actionRemove_Unreachable_Basic_Blocks"/>
+   <addaction name="actionSimplify"/>
+   <addaction name="actionDe_Spill"/>
+   <addaction name="actionPropagate"/>
+   <addaction name="actionEliminate"/>
+   <addaction name="actionApply_ARC"/>
+   <addaction name="actionDetect_Patterns"/>
+   <addaction name="actionResolve_Symbols"/>
+   <addaction name="actionRewrite_Ivar_Loads"/>
+   <addaction name="actionRewrite_Ivar_Stores"/>
+   <addaction name="actionRewrite_objc_msgSend"/>
+   <addaction name="actionEmbed_Blocks"/>
+   <addaction name="actionSimplify_Source"/>
+   <addaction name="actionFix_Types"/>
+   <addaction name="separator"/>
+  </widget>
+  <widget class="QToolBar" name="sideToolBar">
+   <property name="windowTitle">
+    <string>toolBar_2</string>
+   </property>
+   <property name="movable">
+    <bool>false</bool>
+   </property>
+   <property name="iconSize">
+    <size>
+     <width>24</width>
+     <height>24</height>
+    </size>
+   </property>
+   <property name="toolButtonStyle">
+    <enum>Qt::ToolButtonIconOnly</enum>
+   </property>
+   <property name="floatable">
+    <bool>false</bool>
+   </property>
+   <attribute name="toolBarArea">
+    <enum>RightToolBarArea</enum>
+   </attribute>
+   <attribute name="toolBarBreak">
+    <bool>false</bool>
+   </attribute>
+   <addaction name="actionMove_Up"/>
+   <addaction name="actionMove_Down"/>
+   <addaction name="actionRemove_Instruction"/>
+   <addaction name="separator"/>
+   <addaction name="actionPropagate_Instruction"/>
+   <addaction name="actionFold_Constants_on_Instruction"/>
+   <addaction name="actionDead_Code_Elimination_on_Instruction"/>
+   <addaction name="separator"/>
+   <addaction name="actionShow_Def_Use_Chains"/>
+   <addaction name="actionShow_uCode_Generation_Details"/>
+   <addaction name="separator"/>
+   <addaction name="actionMatch_If"/>
+   <addaction name="actionMatch_If_Else"/>
+   <addaction name="actionMatch_Sequence"/>
+   <addaction name="actionMatch_While"/>
+   <addaction name="actionMatch_Single_BB_While"/>
+   <addaction name="actionMatch_Do_While"/>
+  </widget>
+  <action name="actionClose">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/process-stop.svg</normaloff>:/tango/process-stop.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Close</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+W</string>
+   </property>
+  </action>
+  <action name="actionOpen">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/document-open.svg</normaloff>:/tango/document-open.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Open...</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+O</string>
+   </property>
+  </action>
+  <action name="actionSave">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/document-save.svg</normaloff>:/tango/document-save.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Save</string>
+   </property>
+  </action>
+  <action name="actionSave_as">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/document-save.svg</normaloff>:/tango/document-save.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Save as...</string>
+   </property>
+  </action>
+  <action name="actionUndo">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/edit-undo.svg</normaloff>:/tango/edit-undo.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Undo</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Z</string>
+   </property>
+  </action>
+  <action name="actionRedo">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/edit-redo.svg</normaloff>:/tango/edit-redo.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Redo</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Y</string>
+   </property>
+  </action>
+  <action name="actionGo_Back">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/media-seek-backward.svg</normaloff>:/tango/media-seek-backward.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Go Back</string>
+   </property>
+   <property name="iconText">
+    <string>Back</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Left</string>
+   </property>
+  </action>
+  <action name="actionGo_Forward">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/media-seek-forward.svg</normaloff>:/tango/media-seek-forward.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Go Forward</string>
+   </property>
+   <property name="iconText">
+    <string>Forward</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Right</string>
+   </property>
+  </action>
+  <action name="actionSettings">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/preferences-system.svg</normaloff>:/tango/preferences-system.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Settings...</string>
+   </property>
+  </action>
+  <action name="actionMove_Up">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/go-up.svg</normaloff>:/tango/go-up.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Move Up</string>
+   </property>
+  </action>
+  <action name="actionMove_Down">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/go-down.svg</normaloff>:/tango/go-down.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Move Down</string>
+   </property>
+  </action>
+  <action name="actionPropagate">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/view-fullscreen.svg</normaloff>:/tango/view-fullscreen.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Propagate</string>
+   </property>
+   <property name="shortcut">
+    <string>P</string>
+   </property>
+  </action>
+  <action name="actionEliminate">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/format-text-strikethrough.svg</normaloff>:/tango/format-text-strikethrough.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Eliminate</string>
+   </property>
+   <property name="shortcut">
+    <string>E</string>
+   </property>
+  </action>
+  <action name="actionAuto">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/applications-games.svg</normaloff>:/tango/applications-games.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Auto</string>
+   </property>
+  </action>
+  <action name="actionApply_ARC">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/emblem-photos.svg</normaloff>:/tango/emblem-photos.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Apply ARC</string>
+   </property>
+   <property name="iconText">
+    <string>ARC</string>
+   </property>
+  </action>
+  <action name="actionDetect_Patterns">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/utilities-system-monitor.svg</normaloff>:/tango/utilities-system-monitor.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Detect Patterns</string>
+   </property>
+   <property name="iconText">
+    <string>Patterns</string>
+   </property>
+   <property name="shortcut">
+    <string>D</string>
+   </property>
+  </action>
+  <action name="actionResolve_Symbols">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/folder-saved-search.svg</normaloff>:/tango/folder-saved-search.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Resolve Symbols</string>
+   </property>
+   <property name="iconText">
+    <string>Resolve</string>
+   </property>
+  </action>
+  <action name="actionGenerate_uCode">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/applications-multimedia.svg</normaloff>:/tango/applications-multimedia.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Generate µCode</string>
+   </property>
+   <property name="iconText">
+    <string>→ µCode</string>
+   </property>
+   <property name="shortcut">
+    <string>G</string>
+   </property>
+  </action>
+  <action name="actionGenerate_Basic_Blocks">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/applications-multimedia.svg</normaloff>:/tango/applications-multimedia.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Generate Basic Blocks</string>
+   </property>
+   <property name="iconText">
+    <string>→ BBs</string>
+   </property>
+   <property name="shortcut">
+    <string>G</string>
+   </property>
+  </action>
+  <action name="actionGenerate_Source">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/applications-multimedia.svg</normaloff>:/tango/applications-multimedia.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Generate Source</string>
+   </property>
+   <property name="iconText">
+    <string>→ Source</string>
+   </property>
+   <property name="shortcut">
+    <string>G</string>
+   </property>
+  </action>
+  <action name="actionStrip_NOPs">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/applications-accessories.svg</normaloff>:/tango/applications-accessories.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Strip NOPs</string>
+   </property>
+  </action>
+  <action name="actionRemove_Unreachable_Basic_Blocks">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/edit-delete.svg</normaloff>:/tango/edit-delete.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Strip BBs</string>
+   </property>
+  </action>
+  <action name="actionSimplify">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/accessories-calculator.svg</normaloff>:/tango/accessories-calculator.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Simplify</string>
+   </property>
+   <property name="shortcut">
+    <string>S</string>
+   </property>
+  </action>
+  <action name="actionDe_Spill">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/edit-clear.svg</normaloff>:/tango/edit-clear.svg</iconset>
+   </property>
+   <property name="text">
+    <string>De-Spill</string>
+   </property>
+  </action>
+  <action name="actionOpen_Demo_Binary_x86">
+   <property name="text">
+    <string>Open Demo Binary (i386)</string>
+   </property>
+  </action>
+  <action name="actionOpen_Demo_Binary_x86_64">
+   <property name="text">
+    <string>Open Demo Binary (x86_64)</string>
+   </property>
+  </action>
+  <action name="actionOpen_Demo_Binary_armv7">
+   <property name="text">
+    <string>Open Demo Binary (armv7)</string>
+   </property>
+  </action>
+  <action name="actionOpen_Demo_Binary_arm64">
+   <property name="text">
+    <string>Open Demo Binary (arm64)</string>
+   </property>
+  </action>
+  <action name="actionPropagate_Instruction">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/view-fullscreen.svg</normaloff>:/tango/view-fullscreen.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Propagate Instruction</string>
+   </property>
+  </action>
+  <action name="actionFold_Constants_on_Instruction">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/x-office-address-book.svg</normaloff>:/tango/x-office-address-book.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Fold Constants on Instruction</string>
+   </property>
+  </action>
+  <action name="actionDead_Code_Elimination_on_Instruction">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/format-text-strikethrough.svg</normaloff>:/tango/format-text-strikethrough.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Dead Code Elimination on Instruction</string>
+   </property>
+  </action>
+  <action name="actionDisable_Undo_Redo">
+   <property name="text">
+    <string>Disable Undo-Redo</string>
+   </property>
+  </action>
+  <action name="actionShow_Def_Use_Chains">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/view-refresh.svg</normaloff>:/tango/view-refresh.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Show Def-Use Chains</string>
+   </property>
+  </action>
+  <action name="actionShow_uCode_Generation_Details">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/accessories-text-editor.svg</normaloff>:/tango/accessories-text-editor.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Show µCode Generation Details</string>
+   </property>
+  </action>
+  <action name="actionRemove_Instruction">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/dialog-error.svg</normaloff>:/tango/dialog-error.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Remove Instruction</string>
+   </property>
+  </action>
+  <action name="actionGenerate_CFG">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/applications-multimedia.svg</normaloff>:/tango/applications-multimedia.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Generate CFG</string>
+   </property>
+   <property name="iconText">
+    <string>→ CFG</string>
+   </property>
+  </action>
+  <action name="actionMatch_If">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/software-update-available.svg</normaloff>:/tango/software-update-available.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Match If</string>
+   </property>
+  </action>
+  <action name="actionMatch_Sequence">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/software-update-available.svg</normaloff>:/tango/software-update-available.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Match Sequence</string>
+   </property>
+  </action>
+  <action name="actionMatch_While">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/software-update-available.svg</normaloff>:/tango/software-update-available.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Match While</string>
+   </property>
+  </action>
+  <action name="actionMatch_Single_BB_While">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/software-update-available.svg</normaloff>:/tango/software-update-available.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Match Single BB While</string>
+   </property>
+  </action>
+  <action name="actionMatch_If_Else">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/software-update-available.svg</normaloff>:/tango/software-update-available.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Match If-Else</string>
+   </property>
+  </action>
+  <action name="actionMatch_Do_While">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/software-update-available.svg</normaloff>:/tango/software-update-available.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Match Do-While</string>
+   </property>
+  </action>
+  <action name="actionMatch_Early_Return">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/software-update-available.svg</normaloff>:/tango/software-update-available.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Match Early Return</string>
+   </property>
+  </action>
+  <action name="actionMatch_Multi_If">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/software-update-available.svg</normaloff>:/tango/software-update-available.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Match Multi If</string>
+   </property>
+  </action>
+  <action name="actionDuplicate_Exit_Node">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/edit-copy.svg</normaloff>:/tango/edit-copy.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Duplicate Exit Node</string>
+   </property>
+  </action>
+  <action name="actionMatch_Infinite_Loop">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/software-update-available.svg</normaloff>:/tango/software-update-available.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Match Infinite Loop</string>
+   </property>
+  </action>
+  <action name="actionMatch_Switch">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/software-update-available.svg</normaloff>:/tango/software-update-available.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Match Switch</string>
+   </property>
+  </action>
+  <action name="actionRewrite_Ivar_Loads">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/edit-select-all.svg</normaloff>:/tango/edit-select-all.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Rewrite Ivar Loads</string>
+   </property>
+   <property name="iconText">
+    <string>Ivar Loads</string>
+   </property>
+  </action>
+  <action name="actionRewrite_Ivar_Stores">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/edit-select-all.svg</normaloff>:/tango/edit-select-all.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Rewrite Ivar Stores</string>
+   </property>
+   <property name="iconText">
+    <string>Ivar Stores</string>
+   </property>
+  </action>
+  <action name="actionRewrite_objc_msgSend">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/edit-select-all.svg</normaloff>:/tango/edit-select-all.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Rewrite objc_msgSend</string>
+   </property>
+   <property name="iconText">
+    <string>objc_msgSend</string>
+   </property>
+  </action>
+  <action name="actionHelp">
+   <property name="text">
+    <string>Help</string>
+   </property>
+  </action>
+  <action name="actionStart_profiling">
+   <property name="text">
+    <string>Start profiling</string>
+   </property>
+  </action>
+  <action name="actionStop_profiling">
+   <property name="text">
+    <string>Stop profiling</string>
+   </property>
+  </action>
+  <action name="actionPrint_profiling_stats">
+   <property name="text">
+    <string>Print profiling stats</string>
+   </property>
+  </action>
+  <action name="actionEmbed_Blocks">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/edit-select-all.svg</normaloff>:/tango/edit-select-all.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Embed Blocks</string>
+   </property>
+  </action>
+  <action name="actionSimplify_Source">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/edit-select-all.svg</normaloff>:/tango/edit-select-all.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Simplify Source Code</string>
+   </property>
+  </action>
+  <action name="actionFix_Types">
+   <property name="icon">
+    <iconset resource="icons/tango.qrc">
+     <normaloff>:/tango/edit-select-all.svg</normaloff>:/tango/edit-select-all.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Fix Types</string>
+   </property>
+  </action>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>MyTreeWidget</class>
+   <extends>QTreeWidget</extends>
+   <header>widgets/tree.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources>
+  <include location="icons/tango.qrc"/>
+  <include location="icons/letters.qrc"/>
+ </resources>
+ <connections/>
+</ui>

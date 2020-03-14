@@ -1,0 +1,320 @@
+from analysis.asm.assembly_printer import AssemblyPrinter
+import analysis.source.ast_printer
+from analysis.asm.basicblock import detect_bb_beginnings_and_function_end, convert_stuff_beyond_end_to_data, \
+    detect_jump_tables, detect_function_end_from_bb_beginnings
+from analysis.asm.functionpass import StripTrailingNops
+from analysis.source.ast_function import AstFunction
+from analysis.source.transforms.blocks import EmbedBlocksRewriter
+from analysis.source.transforms.ivar import IvarLoadRewriter, IvarStoreRewriter
+from analysis.source.transforms.msgsend import MsgSendRewriter
+from analysis.source.transforms.simplify import SimplifySourceRewriter
+from analysis.source.transforms.types import TypeRewriter
+from objctype2.types import Struct
+from .types import *
+
+from analysis.asm.assembly import AssemblyInstruction, AssemblyDataInstruction
+from analysis.source.ast_builder import AstBuilder
+from analysis.asm.basicblock import detect_basic_blocks
+
+
+# Represents a function variable (argument or stack item)
+class FunctionVariable:
+    def __init__(self, name, size, type, location, offset, is_register, register, subregister):
+        self.name = name
+        self.size = size
+        self.type = type
+        self.location = location
+        self.offset = offset
+        self.sp_offset = None
+        self.is_register = is_register
+        self.register = register
+        self.subregister = subregister
+        self.block_flags_stack_item = False
+
+
+# Main "Function" class representing all of one function's code, assembly instructions, basic blocks,
+# AST, CFG, and everything.
+class Function:
+    def __init__(self, arch, binary, name, addr, len):
+        self.arch = arch
+        self.name = name
+        self.bytes = None
+        self.instructions = None
+        self.bb_beginnings = None
+        self.func_end = None
+        self.bbs = None
+        self.ast = None
+        self.class_refs = None
+        self.addr = addr
+        self.len = len
+        self.binary = binary
+        self.patterns = []
+        self.ufunction = None
+        self.parameters = None
+        self.returns = None
+        self.stack_frame_size = 0
+        self.stack_variables = None
+        self.method = None
+        self.pic_info = None
+        self.block_descriptor = None
+
+    def replace_with_function(self, f2):
+        for key, value in vars(self).items():
+            setattr(self, key, getattr(f2, key))
+
+        # Sanity check.
+        for bb in self.bbs:
+            for instr in bb.instructions:
+                assert instr.bb == bb
+
+    def load(self):
+        if self.instructions is None:
+            self.load_disassembly_from_binary()
+            self.capstone_instructions()
+            self.analyze_input_output()
+            self.analyze_stack_variables()
+            StripTrailingNops(self).run()
+            self.detect_pic_variable()
+            (self.bb_beginnings, self.func_end) = detect_bb_beginnings_and_function_end(self.arch, self.instructions)
+            detect_jump_tables(self)
+            detect_function_end_from_bb_beginnings(self)
+            convert_stuff_beyond_end_to_data(self)
+
+    def detect_pic_variable(self):
+        self.arch.sema.detect_pic(self)
+
+    def load_disassembly_from_binary(self):
+
+        if self.len == -1:
+            function_addrs = sorted(self.binary.addr_to_func_map.keys())
+            idx = function_addrs.index(self.addr)
+            self.len = function_addrs[idx + 1] - self.addr if idx + 1 < len(function_addrs) else self.binary.code_section_end - self.addr
+
+        macho = self.binary.macho
+        file_addr = macho.mappings.fromVM(self.addr)
+        pos = macho.file.tell()
+        macho.file.seek(self.binary.macho.origin + file_addr)
+        bytes = macho.file.read(self.len)
+        macho.file.seek(pos)
+
+        self.bytes = bytes
+        self.instructions = self.instructions_from_bytes(bytes)
+        # print bytes
+
+        # output = subprocess.check_output(["otool", "-arch", self.arch.archvalue, "-t", "-v", "-j", self.binary.path, "-p", self.name])
+        # output = output.decode('utf-8').split("\n")
+        # reader = OtoolReader(self.arch, output)
+        # self.instructions = reader.parseDisassemblyForMethod(self.name)
+
+    def instructions_from_bytes(self, bytes):
+        decoded = self.arch.capstone.disasm(bytes, self.addr)
+        instructions = []
+        next_instr_address = self.addr
+        for csinstr in decoded:
+            instr = AssemblyInstruction(self.arch, csinstr.address, csinstr.bytes, csinstr.mnemonic, csinstr.op_str)
+            instr.csinstr = csinstr
+            instr.canonicalsyntax = "%s %s" % (csinstr.mnemonic, csinstr.op_str)
+            instructions.append(instr)
+            next_instr_address = csinstr.address + csinstr.size
+
+        class AnyObject(object):
+            pass
+
+        while (next_instr_address - self.addr) < len(bytes):
+            b = bytes[next_instr_address - self.addr]
+            instr = AssemblyDataInstruction(self.arch, next_instr_address, b, "db", "0x%x" % ord(b))
+            instr.csinstr = AnyObject()
+            instr.csinstr.mnemonic = "db"
+            instr.csinstr.id = -1
+            instr.csinstr.groups = []
+            instr.csinstr.operands = []
+            instr.csinstr.op_str = "0x%x" % ord(b)
+            instr.canonicalsyntax = "%s %s" % ("db", "0x%x" % ord(b))
+            instructions.append(instr)
+            next_instr_address += 1
+
+        return instructions
+
+    def capstone_instructions(self):
+        for instr in self.instructions:
+            if instr.csinstr is not None: continue
+            instr.canonicalize_capstone()
+
+        self.instructions = [instr for instr in self.instructions if instr.csinstr is not None]
+
+    def is_objc(self):
+        return self.method is not None
+
+    def analyze_input_output(self):
+        from objctype2.parser import parse
+        from balanced_substring import numericSubstring
+
+        if self.method is None and self.block_descriptor is None:
+            self.parameters = []
+            t = self.binary.types.get("long")
+            r = self.arch.sema.retval_location(t)
+            self.returns = FunctionVariable("retval", self.arch.bytes(), t, r, None, True, r, None)
+            return
+
+        if self.block_descriptor is not None:
+            typeinfo = self.block_descriptor.signature
+        else:
+            typeinfo = self.method.type
+
+        index = 0
+        params = []
+        while True:
+            (type_, index) = parse(typeinfo, index)
+            if type_ is None:
+                break
+            (stackIndex, index) = numericSubstring(typeinfo, index)
+            params.append((type_, '@', stackIndex))
+
+        return_type = params[0]
+        params = params[1:]
+
+        return_type = self.convert_type(return_type[0])
+
+        r = self.arch.sema.retval_location(return_type)
+        self.returns = FunctionVariable("retval", return_type.byte_size, return_type, r, None, True, r, None)
+        #if return_type[0].encode() == "v":
+        #    self.return_type.type = "void"
+
+        param_types = []
+        for i in range(0, len(params)):
+            param_types.append(self.convert_type(params[i][0]))
+
+        param_locations = self.arch.sema.input_arg_locations(param_types)
+
+        self.parameters = []
+        for i in range(0, len(params)):
+            t = param_types[i]
+            (reg, subreg, offset) = param_locations[i]
+            is_register = offset is None
+            text = reg
+            if subreg is not None:
+                text = "%s (in sub-register %s)" % (reg, subreg)
+            elif not is_register:
+                text = "[%s + 0x%x]" % (self.arch.sema.base_register(), offset)
+
+            v = FunctionVariable("arg_%x" % params[i][2], params[i][0].sizeof(self.arch.is64bit()), t, text, offset, is_register, reg, subreg)
+            self.parameters.append(v)
+
+        if self.method is not None:
+            assert isinstance(self.parameters[0].type, ObjectType)
+            self.parameters[0].name = "self"
+            assert isinstance(self.parameters[1].type, PointerType)
+            self.parameters[1].name = "_cmd"
+
+        if self.block_descriptor is not None:
+            assert isinstance(self.parameters[0].type, PointerType)
+            self.parameters[0].name = "block_literal"
+
+    def convert_type(self, t):
+        from objctype2.types import ObjCType, Primitive
+
+        if isinstance(t, ObjCType): return self.binary.types.id()
+        elif isinstance(t, Primitive):
+            if t.primitive == ":": return self.binary.types.SEL()
+            elif t.primitive == "i": return self.binary.types.get("int")
+            elif t.primitive == "l": return self.binary.types.get("long")
+            elif t.primitive == "q": return self.binary.types.get("long")
+            elif t.primitive == "Q": return self.binary.types.get("long")  # TODO unsigned
+            elif t.primitive == "f": return self.binary.types.get("float")
+            elif t.primitive == "d": return self.binary.types.get("double")
+            elif t.primitive == "c": return self.binary.types.get("char")
+            elif t.primitive == "v": return self.binary.types.get("void")
+            elif t.primitive == "B": return self.binary.types.get("BOOL")
+            elif t.primitive == "@?": return self.binary.types.void_pointer()
+
+        elif isinstance(t, Struct):
+            # TODO
+            return self.binary.types.create_or_get_struct(t)
+
+        # TODO
+        return self.binary.types.get("long")
+
+    def analyze_stack_variables(self):
+        self.arch.sema.detect_stack_variables(self)
+
+        # Convert multiple stack items into a block literal item
+        if self.stack_frame_size > 0x20:
+            start_offset = None
+            for (idx, v) in enumerate(self.stack_variables):
+                if v.block_flags_stack_item:
+                    start_offset = v.offset - 8
+                    block_descriptor = self.binary.find_block_descriptor_for_function(self)
+                    end_offset = start_offset + block_descriptor.literal_size
+                    break
+            if start_offset is not None:
+                self.stack_variables = [v for v in self.stack_variables if not start_offset <= v.offset < end_offset]
+                idx = len(self.stack_variables)
+                v = FunctionVariable("block_literal", block_descriptor.literal_size, "block_literal",
+                                 "[%s - 0x%x]" % (self.arch.sema.base_register(), -start_offset), start_offset, False, None, None)
+                self.stack_variables.insert(idx, v)
+
+
+    def print_instructions(self):
+        print("Instructions for function '%s' (%s):" % (self.name, self.arch.name))
+        for instr in self.instructions:
+            print(instr)
+        print("")
+
+    def detect_basic_blocks(self):
+        self.bbs = detect_basic_blocks(self, self.arch, self.instructions)
+        #StripNops(self.arch, self).run()
+        #RemoveEmptyBasicBlocks(self.arch, self).run()
+
+    def print_basic_blocks(self):
+        print("Basic blocks for function '%s' (%s):" % (self.name, self.arch.name))
+        for bb in self.bbs:
+            print(bb)
+        print("")
+
+    def print_bb_instructions(self):
+        print("Instructions within basic blocks for function '%s' (%s):" % (self.name, self.arch.name))
+        for bb in self.bbs:
+            print(bb)
+            for instr in bb.instructions:
+                print(instr)
+        print("")
+
+    def can_build_ast(self):
+        return len(self.ufunction.cfg.unassigned_bbs_with_cfg_roots) == 1
+
+    def build_ast(self):
+        builder = AstBuilder(self)
+        self.ast = AstFunction(self)
+        (self.ast.root, self.ast.globals) = builder.convert()
+
+    def transform_ast(self):
+        MsgSendRewriter(self.ast).rewrite()
+        IvarLoadRewriter(self.ast).rewrite()
+        IvarStoreRewriter(self.ast).rewrite()
+        EmbedBlocksRewriter(self.ast).rewrite()
+        SimplifySourceRewriter(self.ast).rewrite()
+        SimplifySourceRewriter(self.ast).rewrite()
+        TypeRewriter(self.ast).rewrite()
+        SimplifySourceRewriter(self.ast).rewrite()
+
+    def print_ast(self):
+        printer = analysis.source.ast_printer.CCodePrinter()
+        printer.execute(self)
+        return printer.text, printer.line_to_object_map
+
+    def print_ucode(self):
+        print("Microcode within basic blocks for function '%s' (%s):" % (self.name, self.arch.name))
+        for bb in self.bbs:
+            print(bb)
+            for instr in bb.ucode:
+                print(("  " + ("0x%x: " % instr.addr) + str(instr)))
+        print("")
+
+    def get_entry_bbs(self):
+        return [bb for bb in self.bbs if bb.is_entry]
+
+    def get_exit_bbs(self):
+        return [bb for bb in self.bbs if bb.is_exit]
+
+    def print_asm_intructions(self):
+        return AssemblyPrinter(self).print_to_text()

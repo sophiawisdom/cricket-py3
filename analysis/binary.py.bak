@@ -1,0 +1,734 @@
+import os
+import re
+import struct
+import subprocess
+from analysis.arch.architecture import Architecture
+from analysis.callprototypes.callprototypes import CallPrototypesResolver
+from analysis.asm.dyldinforeader import DyldInfoReader
+from analysis.function import Function
+from analysis.types import TypeManager
+import macho
+from macho.loadcommands.loadcommand import LC_MAIN
+
+# Holds metainformation about an Objective-C class
+class ObjCClass:
+    def __init__(self, binary, name):
+        self.name = name
+        self.binary = binary
+        self.machoclass = None
+        self.methods = []
+
+    def class_dump(self):
+        return unicode(self.machoclass)
+
+
+# Holds metainformation about an Objective-C method
+class ObjCMethod:
+    METHOD_TYPE_INSTANCE = 1
+    METHOD_TYPE_CLASS = 2
+
+    def __init__(self, binary, name, cls, type, addr):
+        self.name = name
+        self.binary = binary
+        self.cls = cls
+        self.type = type
+        self.machomethod = None
+        self.function = None
+        self.addr = addr
+        self.method_type = self.METHOD_TYPE_INSTANCE
+        self.code_section_start = None
+        self.code_section_end = None
+        self.load_progress_callback = None
+
+
+# Holds metainformation about an Objective-C ivar
+class ObjCIVar:
+    def __init__(self, name, addr, offset):
+        self.name = name
+        self.addr = addr
+        self.offset = offset
+
+
+# Holds metainformation about an Objective-C selector
+class ObjCSelector:
+    def __init__(self, name, addr, string_location):
+        self.name = name
+        self.addr = addr
+        self.string_location = string_location
+
+
+# Represents a class reference
+class ObjCClassRef:
+    def __init__(self, symbol_name, class_name, addr, class_location, external_dylib):
+        self.symbol_name = symbol_name
+        self.class_name = class_name
+        self.addr = addr
+        self.class_location = class_location
+        self.external_dylib = external_dylib
+
+# A CFString/NSString with an address in the binary and a string value
+class ObjCCFString:
+    def __init__(self, name, addr, string, length):
+        self.name = name
+        self.addr = addr
+        self.string = string
+        self.length = length
+
+
+# Stack block literal used inside a function
+class ObjCBlockLiteralInFunction:
+    def __init__(self, instruction_addr, function, name):
+        self.instruction_addr = instruction_addr
+        self.function = function
+        self.name = name
+        self.invoke_addr = None
+        self.invoke_func = None
+
+
+# Global block literal reference in a function
+class ObjCGlobalBlockLiteralReferenceInFunction:
+    def __init__(self, instruction_addr, function, name):
+        self.instruction_addr = instruction_addr
+        self.function = function
+        self.name = name
+
+
+# Global block literal
+class ObjCGlobalBlockLiteral:
+    def __init__(self, addr, invoke_addr, block_descriptor_addr, name):
+        self.invoke_addr = invoke_addr
+        self.invoke_func = None
+        self.addr = addr
+        self.block_descriptor_addr = block_descriptor_addr
+        self.name = name
+        self.uses = []
+
+# Block descriptor
+class ObjcBlockDescriptor:
+    def __init__(self, name, addr, literal_size, copy_addr, dispose_addr, signature):
+        self.name = name
+        self.addr = addr
+        self.literal_size = literal_size
+        self.copy_addr = copy_addr
+        self.dispose_addr = dispose_addr
+        self.signature = signature
+        self.uses = []
+
+# Main "Binary" class representing all the data, metadata, assembly, functions, classes,
+# references and everything that is analyzed from one binary file.
+class Binary:
+    def __init__(self, path, arch):
+        self.path = path
+        ":type: str"
+        self.full_path = os.path.abspath(path)
+        self.arch = arch
+        ":type: Architecture"
+        self.functions = []
+        self.classes = []
+        self.block_descriptors = []
+        self.global_block_literals = []
+        self.addr_to_func_map = {}
+
+        self.class_refs = None
+        self.stubs = None
+        self.imported_data_symbols = None
+        self.external_pointers = None
+        self.ivars = None
+        self.selectors = None
+        self.cfstrings = None
+
+        self.macho = None
+        self.call_resolver = None
+        self.types = TypeManager(self.arch)
+        ":type: TypeManager"
+
+        self.load_progress_callback = None
+
+    # Don't deep copy.
+    def __deepcopy__(self, memo):
+        # Return self.
+        from copy import deepcopy
+        result = self
+        memo[id(self)] = result
+        return result
+
+    @staticmethod
+    def list_architectures_from_file(path):
+        lines = subprocess.check_output(["lipo", "-detailed_info",path]).decode('utf-8').split("\n")
+        archs = []
+        for line in lines:
+            if line == "": continue
+            m = re.match("^architecture ([a-zA-Z0-9_]+)$", line)
+            if m:
+                arch = m.group(1)
+                arch = Architecture.get_arch_from_archvalue(arch)
+                archs.append(arch)
+            m = re.match("^Non-fat file: .* is architecture: ([a-zA-Z0-9_]+)$", line)
+            if m:
+                arch = m.group(1)
+                arch = Architecture.get_arch_from_archvalue(arch)
+                return [arch]
+
+        return archs
+
+    def load(self):
+        if self.load_progress_callback: self.load_progress_callback.progress("Loading function prototype database...")
+        self.call_resolver = CallPrototypesResolver(self.arch, self)
+
+        self.load_info_from_dyld()
+
+        self.scan_functions()
+        self.load_classes()
+
+    def scan_code_section(self):
+        function_starts = set()
+
+        section_content = self.read_bytes_at_vm(self.code_section_start, self.code_section_end - self.code_section_start)
+        addr = self.code_section_start
+        while addr < self.code_section_end:
+            p = float(addr - self.code_section_start) / float(self.code_section_end - self.code_section_start)
+            if self.load_progress_callback: self.load_progress_callback.progress("Scanning code section...", p)
+
+            to_skip = addr - self.code_section_start
+            decoded = self.arch.capstone.disasm(section_content[to_skip:], addr)
+            for i in decoded:
+                if self.arch.sema.is_call(i):
+                    target = self.arch.sema.call_destination(i)
+                    if target is not None:
+                        if target >= self.code_section_start and target < self.code_section_end:
+                            # print "0x%x: %s %s  ==> 0x%x" % (i.address, i.mnemonic, i.op_str, target)
+                            function_starts.add(target)
+
+                # XXX TODO
+                if self.arch.sema.is_unconditional_jump_csinstr(i):
+                    target = self.arch.sema.unconditional_jump_destination_csinstr(i)
+                    if target is not None:
+                        if target >= self.code_section_start and target < self.code_section_end:
+                            first_few_instructions = self.get_first_few_instructions(i.address + i.size)
+                            looks_like_its_a_tail_jmp = self.arch.sema.looks_like_a_function_start(i.address, first_few_instructions)
+
+                            first_few_instructions = self.get_first_few_instructions(target)
+                            looks_like_a_function = self.arch.sema.looks_like_a_function_start(target, first_few_instructions)
+
+                            if looks_like_a_function and looks_like_its_a_tail_jmp:
+                                # print "0x%x: %s %s  ==> 0x%x" % (i.address, i.mnemonic, i.op_str, target)
+                                function_starts.add(target)
+
+                ptrs = self.arch.sema.guess_pointers(i, None, self.code_section_start, self.code_section_end)  # TODO
+                for ptr in ptrs:
+                    if ptr >= self.code_section_start and ptr < self.code_section_end:
+                        first_few_instructions = self.get_first_few_instructions(ptr)
+                        if self.arch.sema.looks_like_a_function_start(ptr, first_few_instructions):
+                            # print "0x%x: %s %s  ==>  0x%x" % (i.address, i.mnemonic, i.op_str, ptr)
+                            function_starts.add(ptr)
+
+                if self.arch.sema.is_nop_csinstr(i):
+                    a = i.address + i.size
+                    first_few_instructions = self.get_first_few_instructions(a)
+                    looks_like_a_function = self.arch.sema.looks_like_a_function_start(a, first_few_instructions)
+                    if looks_like_a_function:
+                            # print "0x%x: %s %s  ==>  0x%x" % (i.address, i.mnemonic, i.op_str, ptr)
+                            function_starts.add(a)
+
+                addr = i.address + i.size
+
+            # skip one instruction (can't be decoded), or align the address to next arch.bytes() byte
+            addr = (addr + self.arch.bytes()) & (~(self.arch.bytes()-1))
+
+        return function_starts
+
+    def get_first_few_instructions(self, addr):
+        data = self.read_bytes_at_vm(addr, 64)
+        decoded = self.arch.capstone.disasm(data, addr, 4)
+        return list(decoded)
+
+    def ptr_looks_like_a_function_start(self, ptr):
+        if self.code_section_start <= ptr < self.code_section_end:
+            first_few_instructions = self.get_first_few_instructions(ptr)
+            if self.arch.sema.looks_like_a_function_start(ptr, first_few_instructions):
+                return True
+
+        return False
+
+    def looks_like_a_block_signature(self, signature):
+        if re.match("^v[0-9]+@", signature): return True
+        if re.match("@[0-9]+$", signature): return True
+        if re.match("^@\"", signature): return True
+
+        return False
+
+    def scan_data_section(self):
+        sections = list(self.macho.allSections("sectname", "__const"))
+        if len(sections) == 0: return set()
+
+        function_starts = set()
+        for s in sections:
+            section_start = s.addr
+            section_end = s.addr + s.size
+
+            addr = section_start
+            while addr < section_end:
+
+                ptr = self.read_long_at_vm(addr)
+
+                # --- look for code pointers and heuristically discover new function starts
+                if self.ptr_looks_like_a_function_start(ptr):
+                    function_starts.add(ptr)
+
+                # --- look for block descriptors
+                if ptr == 0:
+                    ptr2 = self.read_long_at_vm(addr + 1 * self.arch.bytes())
+                    if 0x20 <= ptr2 < 0x100:
+                        ptr3 = self.read_long_at_vm(addr + 2 * self.arch.bytes())
+                        ptr4 = self.read_long_at_vm(addr + 3 * self.arch.bytes())
+
+                        if self.ptr_looks_like_a_function_start(ptr3) and self.ptr_looks_like_a_function_start(ptr4):
+                            ptr5 = self.read_long_at_vm(addr + 4 * self.arch.bytes())
+                            ptr6 = self.read_long_at_vm(addr + 5 * self.arch.bytes())
+
+                            signature = self.read_c_string_at_vm(ptr5)
+                            if self.looks_like_a_block_signature(signature):
+                                name = "block_descriptor_%x" % addr
+                                self.block_descriptors.append(ObjcBlockDescriptor(name, addr, ptr2, ptr3, ptr4, signature))
+
+                        else:
+                            signature = self.read_c_string_at_vm(ptr3)
+                            if self.looks_like_a_block_signature(signature):
+                                name = "block_descriptor_%x" % addr
+                                self.block_descriptors.append(
+                                    ObjcBlockDescriptor(name, addr, ptr2, ptr3, ptr4, signature))
+
+                # --- look for global block literals
+                if addr in self.imported_data_symbols:
+                    if self.imported_data_symbols[addr] == "__NSConcreteGlobalBlock":
+                        ptr2 = self.read_long_at_vm(addr + 1 * self.arch.bytes())
+                        ptr3 = self.read_long_at_vm(addr + 2 * self.arch.bytes())
+                        ptr4 = self.read_long_at_vm(addr + 3 * self.arch.bytes())
+
+                        if self.ptr_looks_like_a_function_start(ptr3):
+                            name = "global_block_literal_%x" % addr
+                            self.global_block_literals.append(ObjCGlobalBlockLiteral(addr, ptr3, ptr4, name))
+
+                addr += self.arch.bytes()
+
+        return function_starts
+
+    def scan_functions(self):
+        if self.load_progress_callback: self.load_progress_callback.progress("Loading classes...")
+        self.get_macho()
+
+        sections = list(self.macho.allSections("sectname", "__text"))
+        assert len(sections) == 1
+        text_section = sections[0]
+        self.code_section_start = text_section.addr
+        self.code_section_end = text_section.addr + text_section.size
+
+        function_starts = set()
+        addr_to_sym_name = {}
+
+        entry_vm_addr = -1
+        lc = self.macho.loadCommands.any("cmd", LC_MAIN)
+        if lc is not None:
+            entryoff = self.read_uin64_at_file_addr(lc.offset)
+            entry_vm_addr = entryoff + self.macho.segment("__TEXT").vmaddr
+            function_starts.add(entry_vm_addr)
+
+        for sym in self.macho.symbols:
+            if sym.addr >= self.code_section_start and sym.addr < self.code_section_end:
+                if sym.addr not in function_starts:
+                    # print sym.name, hex(sym.addr)
+                    function_starts.add(sym.addr)
+                    addr_to_sym_name[sym.addr] = sym.name
+
+        # Add all class and instance methods.
+        classlist_section = self.get_section_classes()
+        if classlist_section is not None:
+            classes = classlist_section.classes
+            for c in classes:
+                for m in c.methods.values():
+                    addr = m.imp
+                    fullname = "-[%s %s]" % (c.name, m.name)
+                    function_starts.add(addr)
+                    addr_to_sym_name[addr] = fullname
+
+                for m in c.classMethods.values():
+                    addr = m.imp
+                    fullname = "+[%s %s]" % (c.name, m.name)
+                    function_starts.add(addr)
+                    addr_to_sym_name[addr] = fullname
+
+        categorylist_sections = list(self.macho.allSections("sectname", "__objc_catlist"))
+        if len(categorylist_sections) > 0:
+            assert len(categorylist_sections) == 1
+            categories = categorylist_sections[0].categories
+            for c in categories:
+                for m in c.methods.values():
+                    addr = m.imp
+                    n = "%s(%s)" % (c.class_.name, c.name)
+                    fullname = "-[%s %s]" % (n, m.name)
+                    function_starts.add(addr)
+                    addr_to_sym_name[addr] = fullname
+
+                for m in c.classMethods.values():
+                    addr = m.imp
+                    n = "%s(%s)" % (c.class_.name, c.name)
+                    fullname = "+[%s %s]" % (n, m.name)
+                    function_starts.add(addr)
+                    addr_to_sym_name[addr] = fullname
+
+        if self.load_progress_callback: self.load_progress_callback.progress("Scanning code section...")
+        scanned_function_starts = self.scan_code_section()
+        function_starts = function_starts.union(scanned_function_starts)
+
+        if self.load_progress_callback: self.load_progress_callback.progress("Scanning data section...")
+        scanned_function_starts = self.scan_data_section()
+        function_starts = function_starts.union(scanned_function_starts)
+
+        if self.load_progress_callback: self.load_progress_callback.progress("Creating functions...")
+
+        l = sorted(function_starts)
+        for idx, addr in enumerate(l):
+            if addr in addr_to_sym_name.keys() and addr_to_sym_name[addr] != "":
+                sym_name = addr_to_sym_name[addr]
+            elif addr == entry_vm_addr:
+                sym_name = "EntryPoint"
+            else:
+                sym_name = "sub_%x" % addr
+            length = l[idx + 1] - addr if idx + 1 < len(l) else self.code_section_end - addr
+            # print sym_name, addr, length
+            func = Function(self.arch, self, sym_name, addr, length)
+            func.binary = self
+            self.functions.append(func)
+            self.addr_to_func_map[addr] = func
+
+        self.find_block_references_in_functions()
+
+        # print function_starts
+
+    def addr_to_function(self, addr):
+        for f in self.functions:
+            if f.addr <= addr < f.addr + f.len:
+                return f
+
+        return None
+
+    def lookup_block_invoke_addr(self, instrs):
+        possible_ptrs = []
+        for i in instrs:
+            ptrs = self.arch.sema.guess_pointers(i, None, self.code_section_start, self.code_section_end)
+            for ptr in ptrs:
+                if self.ptr_looks_like_a_function_start(ptr):
+                    possible_ptrs.append(ptr)
+
+        if len(possible_ptrs) > 1:
+            #print "Multiple possible block invoke functions:"
+            #print possible_ptrs
+            pass
+
+        return possible_ptrs[0]
+
+    def find_block_descriptor_for_function(self, function):
+        for b in self.block_descriptors:
+            for u in b.uses:
+                if isinstance(u, ObjCBlockLiteralInFunction):
+                    if u.function == function:
+                        return b
+                elif isinstance(u, ObjCGlobalBlockLiteral):
+                    for u2 in u.uses:
+                        if u2.function == function:
+                            return b
+
+        return None
+
+    def find_block_references_in_functions(self):
+        section_content = self.read_bytes_at_vm(self.code_section_start,
+                                                self.code_section_end - self.code_section_start)
+
+        block_descriptor_addresses = set([b.addr for b in self.block_descriptors])
+        block_descriptor_address_to_block_map = dict([(b.addr, b) for b in self.block_descriptors])
+        global_literal_addresses = set([bl.addr for bl in self.global_block_literals])
+        global_literal_address_to_literal_map = dict([(bl.addr, bl) for bl in self.global_block_literals])
+
+        if len(block_descriptor_addresses | global_literal_addresses) == 0: return
+        lowest_data_pointer = min(block_descriptor_addresses | global_literal_addresses)
+        highest_data_pointer = max(block_descriptor_addresses | global_literal_addresses) + 1
+
+        addr = self.code_section_start
+        while addr < self.code_section_end:
+            to_skip = addr - self.code_section_start
+            decoded = self.arch.capstone.disasm(section_content[to_skip:], addr)
+            window = []
+
+            for (idx, i) in enumerate(decoded):
+                window.append(i)
+                if len(window) > 5: del(window[0])
+
+                ptrs = self.arch.sema.guess_pointers(i, None, lowest_data_pointer, highest_data_pointer)
+                for ptr in ptrs:
+                    if ptr in block_descriptor_address_to_block_map:
+                        block = block_descriptor_address_to_block_map[ptr]
+                        f = self.addr_to_function(i.address)
+                        bl = ObjCBlockLiteralInFunction(i.address, f, f.name)
+
+                        for _ in range(0, 5):
+                            i = decoded.next()
+                            window.append(i)
+
+                        bl.invoke_addr = self.lookup_block_invoke_addr(window)
+                        bl.invoke_func = self.addr_to_function(bl.invoke_addr)
+                        bl.invoke_func.block_descriptor = block
+                        block.uses.append(bl)
+
+                    elif ptr in global_literal_address_to_literal_map:
+                        bl = global_literal_address_to_literal_map[ptr]
+                        f = self.addr_to_function(i.address)
+                        f.block_descriptor = bl.block_descriptor_addr
+                        bl.uses.append(ObjCGlobalBlockLiteralReferenceInFunction(i.address, f, f.name))
+
+                addr = i.address + i.size
+
+            # skip one instruction (can't be decoded), or align the address to next arch.bytes() byte
+            addr = (addr + self.arch.bytes()) & (~(self.arch.bytes() - 1))
+
+        # okay, we're done with the code section, now let's connect global block literals to descriptors
+        for bl in self.global_block_literals:
+            bl.invoke_func = self.addr_to_func_map[bl.invoke_addr]
+            b = block_descriptor_address_to_block_map[bl.block_descriptor_addr]
+            b.uses.append(bl)
+
+    def load_info_from_dyld(self):
+        if self.load_progress_callback: self.load_progress_callback.progress("Loading sections and segments...")
+        self.get_macho()
+
+        dyldreader = DyldInfoReader(self.arch, self.full_path)
+        self.stubs = dyldreader.get_stubs()
+        self.external_pointers = dyldreader.get_external_pointers()
+        self.imported_data_symbols = dyldreader.get_imported_data_symbols()
+
+    def function_from_addr(self, addr, length=None, name=None):
+        addr = self.arch.sema.function_start_from_addr(addr)
+
+        if addr not in self.addr_to_func_map.keys():
+            assert False # We should already have all the functions
+            assert length is not None
+            assert name is not None
+            func = Function(self.arch, self, name, addr, length)
+            func.binary = self
+            self.functions.append(func)
+            self.addr_to_func_map[addr] = func
+
+        return self.addr_to_func_map[addr]
+
+    def get_macho(self):
+        if self.macho is not None: return
+
+        def _enable_libord():
+            import macho.loadcommands.dylib
+        def _enable_vmaddr():
+            import macho.vmaddr
+            import macho.loadcommands.segment
+        def _enable_symbol():
+            import macho.symbol
+            import macho.loadcommands.symtab
+            import macho.loadcommands.dysymtab
+            import macho.loadcommands.dyld_info
+            import macho.sections.symbol_ptr
+        def _enable_encryption():
+            import macho.loadcommands.encryption_info
+        def _enable_strings():
+            import macho.sections.cstring
+            import macho.sections.cfstring
+        def _enable_objc():
+            _enable_symbol()
+            import macho.sections.objc.classlist
+            import macho.sections.objc.protolist
+            import macho.sections.objc.catlist
+        def _enable_all():
+            _enable_symbol()
+            _enable_vmaddr()
+            _enable_encryption()
+            _enable_libord()
+            _enable_strings()
+            _enable_objc()
+        _enable_all()
+
+        self.macho = macho.macho.MachO(self.path, self.arch.archvalue)
+        self.macho.open()
+
+    def read_long_at_vm(self, vm_addr):
+        file_addr = self.macho.mappings.fromVM(vm_addr)
+        pos = self.macho.file.tell()
+        self.macho.file.seek(self.macho.origin + file_addr)
+        bytes = self.macho.file.read(self.arch.bytes())
+        self.macho.file.seek(pos)
+        return struct.unpack("<L" if self.arch.bytes() == 4 else "<Q", bytes)[0]
+
+    def read_uin64_at_file_addr(self, file_addr):
+        pos = self.macho.file.tell()
+        self.macho.file.seek(self.macho.origin + file_addr)
+        bytes = self.macho.file.read(8)
+        self.macho.file.seek(pos)
+        return struct.unpack("<Q", bytes)[0]
+
+    def read_bytes_at_vm(self, vm_addr, num_bytes):
+        file_addr = self.macho.mappings.fromVM(vm_addr)
+        pos = self.macho.file.tell()
+        self.macho.file.seek(self.macho.origin + file_addr)
+        bytes = self.macho.file.read(num_bytes)
+        self.macho.file.seek(pos)
+        return bytes
+
+    def read_c_string_at_vm(self, vm_addr):
+        file_addr = self.macho.mappings.fromVM(vm_addr)
+        pos = self.macho.file.tell()
+        self.macho.file.seek(self.macho.origin + file_addr)
+        s = ""
+        while True:
+            byte = self.macho.file.read_byte()
+            if byte == "\0":
+                break
+            s += byte
+        self.macho.file.seek(pos)
+        return s
+
+    def read_selectors(self):
+        self.get_macho()
+
+        self.selectors = {}
+
+        sections = list(self.macho.allSections("sectname", "__objc_selrefs"))
+        if len(sections) == 0: return
+        assert len(sections) == 1
+        section = sections[0]
+
+        idx = 0
+        while idx < section.size:
+            selref_addr = section.addr + idx
+            selector_value = self.read_long_at_vm(selref_addr)
+            selector_name = self.read_c_string_at_vm(selector_value)
+            selector_name = "_OBJC_SELECTOR_$_%s" % selector_name
+            self.selectors[selref_addr] = ObjCSelector(selector_name, selref_addr, selector_value)
+            idx += self.arch.bytes()
+
+    def read_class_refs(self):
+        self.get_macho()
+
+        self.class_refs = {}
+
+        sections = list(self.macho.allSections("sectname", "__objc_classrefs"))
+        if len(sections) == 0: return
+        assert len(sections) == 1
+        section = sections[0]
+
+
+        dyldreader = DyldInfoReader(self.arch, self.full_path)
+        dyld_class_refs = dyldreader.get_class_refs()
+
+        idx = 0
+        while idx < section.size:
+            classref_addr = section.addr + idx
+            classdef_addr = self.read_long_at_vm(classref_addr)
+            if classdef_addr != 0:
+                classdata_addr = self.read_long_at_vm(classdef_addr + self.arch.bytes() * 4)
+                class_name_addr = self.read_long_at_vm(classdata_addr + 4 * 4 + (1 * self.arch.bytes() if self.arch.bytes() == 8 else 0))
+                class_name = self.read_c_string_at_vm(class_name_addr)
+                symbol_name = "_OBJC_CLASS_$_%s" % class_name
+                external_dylib = None
+            else:
+                symbol_name = dyld_class_refs[classref_addr]["symbol"]
+                class_name = symbol_name.replace("_OBJC_CLASS_$_", "")
+                external_dylib = dyld_class_refs[classref_addr]["dylib"]
+            self.class_refs[classref_addr] = ObjCClassRef(symbol_name, class_name, classref_addr, classdef_addr, external_dylib)
+            idx += self.arch.bytes()
+
+    def mangle_cfstring(self, s):
+        return re.sub("__*", "_", re.sub("[^a-zA-Z0-9_]", "_", s).strip("_"))
+
+    def read_cfstrings(self):
+        self.get_macho()
+
+        self.cfstrings = {}
+
+        sections = list(self.macho.allSections("sectname", "__cfstring"))
+        if len(sections) == 0: return
+        assert len(sections) == 1
+        section = sections[0]
+
+        idx = 0
+        while idx < section.size:
+            cfstring_addr = section.addr + idx
+            cstring_addr = self.read_long_at_vm(cfstring_addr + self.arch.bytes() * 2)
+            assert cfstring_addr != 0
+            length = self.read_long_at_vm(cfstring_addr + self.arch.bytes() * 3)
+            val = self.read_c_string_at_vm(cstring_addr)
+            name = "_OBJC_CFSTRING_$_%s" % self.mangle_cfstring(val)
+            self.cfstrings[cfstring_addr] = ObjCCFString(name, cfstring_addr, val, length)
+
+            idx += self.arch.bytes() * 4
+
+    def load_class(self, c, ivars, name):
+        myclass = ObjCClass(self, name)
+        myclass.machoclass = c
+        for (n, m) in c.methods.items():
+            mymethod = ObjCMethod(self, m.name, myclass, m.encoding, m.imp)
+            fullname = "-[%s %s]" % (name, m.name)
+            mymethod.function = self.function_from_addr(m.imp, -1, fullname)  # TODO 1
+            mymethod.function.method = mymethod
+            myclass.methods.append(mymethod)
+        for (n, m) in c.classMethods.items():
+            mymethod = ObjCMethod(self, m.name, myclass, m.encoding, m.imp)
+            fullname = "+[%s %s]" % (name, m.name)
+            mymethod.function = self.function_from_addr(m.imp, -1, fullname)  # TODO 1
+            mymethod.method_type = ObjCMethod.METHOD_TYPE_CLASS
+            mymethod.function.method = mymethod
+            myclass.methods.append(mymethod)
+
+        myclass.methods.sort(key=lambda x: x.addr)
+
+        self.classes.append(myclass)
+
+        if ivars:
+            for i in c.ivars.values():
+                symbol_name = "_OBJC_IVAR_$_%s.%s" % (c.name, i.name)
+                addr = i.offsetAddress
+                # sym = self.macho.symbols.any("name", symbol_name)
+                ivar = ObjCIVar(symbol_name, addr, i.offset)
+                self.ivars[addr] = ivar
+
+    def get_section_classes(self):
+        s = list(self.macho.allSections("sectname", "__objc_classlist")) + list(self.macho.allSections("sectname", "__class"))
+        if len(s) == 0: return None
+        assert len(s) == 1
+        return s[0]
+
+    def load_classes(self):
+        self.get_macho()
+        self.classes = []
+
+        self.ivars = {}
+
+        if self.load_progress_callback: self.load_progress_callback.progress("Loading selectors...")
+        self.read_selectors()
+
+        if self.load_progress_callback: self.load_progress_callback.progress("Loading class references...")
+        self.read_class_refs()
+
+        if self.load_progress_callback: self.load_progress_callback.progress("Loading strings...")
+        self.read_cfstrings()
+
+        if self.load_progress_callback: self.load_progress_callback.progress("Loading class list...")
+
+        s = self.get_section_classes()
+        if s is not None:
+            for c in s.classes:
+                self.load_class(c, True, c.name)
+
+        if self.load_progress_callback: self.load_progress_callback.progress("Loading category list...")
+
+        s = list(self.macho.allSections("sectname", "__objc_catlist"))
+        if len(s) > 0:
+            assert len(s) == 1
+            for c in s[0].categories:
+                # TODO: category name
+                n = "%s(%s)" % (c.class_.name, c.name)
+                self.load_class(c, False, n)

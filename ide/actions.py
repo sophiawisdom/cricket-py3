@@ -1,0 +1,580 @@
+import pstats
+
+import io
+
+from PyQt5.QtCore import QCoreApplication
+from PyQt5.QtCore import QEventLoop
+from PyQt5.QtGui import QFont
+from PyQt5.QtWidgets import QWidgetAction, QAction, QWidget, QSizePolicy, QToolBar, QProgressDialog
+
+from analysis import transforms
+from analysis.asm.functionpass import StripNops, RemoveUnreachableBasicBlocks, JoinLinearBasicBlocks
+from analysis.source.transforms.blocks import EmbedBlocksRewriter
+from analysis.source.transforms.ivar import IvarLoadRewriter, IvarStoreRewriter
+from analysis.source.transforms.msgsend import MsgSendRewriter
+from analysis.source.transforms.simplify import SimplifySourceRewriter
+from analysis.source.transforms.types import TypeRewriter
+from analysis.transforms import auto_build_bbs, auto_transform_bbs, auto_match_cfg, auto_transform_ucode, \
+    auto_optimize_ast
+from analysis.ucode.ucode_builder import UCodeBuilder
+from analysis.ucode.ucode_cfg import CFGGraph
+from analysis.ucode.ucode_transformsfunction import *
+from analysis.ucode.ucode_transformsinstruction import *
+from analysis.ucode.ucode_transformsbb import *
+
+menu_action_methods = []
+
+def MenuAction(qt_action_name, enabled_method=None):
+    def decorator(func):
+        def always_true(_):
+            return True
+        menu_action_methods.append((qt_action_name, func, enabled_method if enabled_method is not None else always_true))
+        return func
+    return decorator
+
+
+class ActionManager:
+    def __init__(self, main_window):
+        self.main_window = main_window
+        """:type : MainWindow"""
+
+        self.toolbar = self.main_window.mainToolBar
+        """:type : QToolBar"""
+
+        self.setup_toolbar()
+
+        self.original_actions = self.toolbar.actions()
+        self.auto_action = self.main_window.actionAuto
+
+    def setup_toolbar(self):
+        # Replace the last separator with a spacer (expanding widget).
+        actions = self.toolbar.findChildren(QAction)
+        sep = actions[len(actions) - 1]
+        w = QWidget()
+        w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.toolbar.insertWidget(sep, w)
+        self.toolbar.removeAction(sep)
+
+        # Set toolbars font size.
+        font = QFont()
+        font.setFamily('Helvetica Neue')
+        font.setPointSize(10)
+        self.toolbar.setFont(font)
+
+    def setup_actions(self):
+        self.main_window.actionAuto.triggered.connect(self.auto)
+        self.main_window.actionMove_Up.triggered.connect(self.move_up)
+        self.main_window.actionMove_Down.triggered.connect(self.move_down)
+        self.main_window.actionDetect_Patterns.triggered.connect(self.detect_patterns)
+        self.main_window.actionEliminate.triggered.connect(self.eliminate)
+        self.main_window.actionGenerate_Basic_Blocks.triggered.connect(self.generate_bbs)
+        self.main_window.actionGenerate_uCode.triggered.connect(self.generate_ucode)
+        self.main_window.actionGenerate_CFG.triggered.connect(self.generate_cfg)
+        self.main_window.actionGenerate_Source.triggered.connect(self.generate_source)
+        self.main_window.actionStrip_NOPs.triggered.connect(self.strip_nops)
+        self.main_window.actionRemove_Unreachable_Basic_Blocks.triggered.connect(self.strip_bbs)
+        self.main_window.actionDe_Spill.triggered.connect(self.de_spill)
+        self.main_window.actionPropagate.triggered.connect(self.propagate)
+        self.main_window.actionSimplify.triggered.connect(self.simplify)
+        self.main_window.actionResolve_Symbols.triggered.connect(self.resolve)
+        self.main_window.actionApply_ARC.triggered.connect(self.arc)
+
+        self.main_window.actionRemove_Instruction.triggered.connect(self.instruction_action(UCodeRemoveInstruction))
+        self.main_window.actionPropagate_Instruction.triggered.connect(self.instruction_action(UCodeCopyPropagateInstruction))
+        self.main_window.actionFold_Constants_on_Instruction.triggered.connect(self.instruction_action(UCodeConstantFoldInstruction))
+        self.main_window.actionDead_Code_Elimination_on_Instruction.triggered.connect(self.instruction_action(UCodeDeadCodeEliminateInstruction))
+
+        self.main_window.actionDisable_Undo_Redo.triggered.connect(self.disable_undo_redo)
+
+        self.main_window.actionShow_Def_Use_Chains.triggered.connect(self.ucode_show_def_use)
+        self.main_window.actionShow_uCode_Generation_Details.triggered.connect(self.ucode_show_details)
+
+        self.main_window.actionMatch_If.triggered.connect(self.cfg_convert_if)
+        self.main_window.actionMatch_If_Else.triggered.connect(self.cfg_convert_if_else)
+        self.main_window.actionMatch_Sequence.triggered.connect(self.cfg_convert_sequence)
+        self.main_window.actionMatch_While.triggered.connect(self.cfg_convert_while)
+        self.main_window.actionMatch_Single_BB_While.triggered.connect(self.cfg_convert_single_bb_while)
+        self.main_window.actionMatch_Do_While.triggered.connect(self.cfg_convert_do_while)
+        self.main_window.actionMatch_Early_Return.triggered.connect(self.cfg_convert_early_return)
+        self.main_window.actionMatch_Multi_If.triggered.connect(self.cfg_convert_multi_if)
+        self.main_window.actionDuplicate_Exit_Node.triggered.connect(self.cfg_convert_duplicate_exit_node)
+        self.main_window.actionMatch_Infinite_Loop.triggered.connect(self.cfg_convert_infinite_loop)
+        self.main_window.actionMatch_Switch.triggered.connect(self.cfg_convert_switch)
+
+        for (qt_action_name, method, enabled_method) in menu_action_methods:
+            getattr(self.main_window, qt_action_name).triggered.connect(method.__get__(self))
+
+
+    def disable_undo_redo(self):
+        self.main_window.undo_manager.disable()
+
+    def enable_and_disable_actions(self):
+        idx = self.main_window.current_tab()
+        self.main_window.actionGenerate_Basic_Blocks.setEnabled(idx == self.main_window.TAB_DISASSEMBLY)
+        self.main_window.actionGenerate_uCode.setEnabled(idx == self.main_window.TAB_BASIC_BLOCKS)
+        self.main_window.actionGenerate_CFG.setEnabled(idx == self.main_window.TAB_UCODE)
+        self.main_window.actionGenerate_Source.setEnabled(idx in [self.main_window.TAB_CFG])
+
+        self.main_window.actionStrip_NOPs.setEnabled(
+            idx in [self.main_window.TAB_DISASSEMBLY, self.main_window.TAB_UCODE])
+        self.main_window.actionRemove_Unreachable_Basic_Blocks.setEnabled(idx == self.main_window.TAB_BASIC_BLOCKS)
+        self.main_window.actionDe_Spill.setEnabled(idx == self.main_window.TAB_UCODE)
+        self.main_window.actionPropagate.setEnabled(idx == self.main_window.TAB_UCODE)
+        self.main_window.actionSimplify.setEnabled(idx == self.main_window.TAB_UCODE)
+        self.main_window.actionResolve_Symbols.setEnabled(idx == self.main_window.TAB_UCODE)
+        self.main_window.actionEliminate.setEnabled(idx == self.main_window.TAB_UCODE)
+        self.main_window.actionApply_ARC.setEnabled(idx == self.main_window.TAB_UCODE)
+        self.main_window.actionDetect_Patterns.setEnabled(idx == self.main_window.TAB_UCODE)
+
+        for (qt_action_name, method, enabled_method) in menu_action_methods:
+            getattr(self.main_window, qt_action_name).setEnabled(enabled_method(self))
+
+        self.hide_disabled_item_from_toolbar()
+
+    def tab_changed(self, idx):
+        self.enable_and_disable_actions()
+
+    def cfg_node_changed(self, cfg_node):
+        self.main_window.actionMatch_If.setEnabled(False)
+        self.main_window.actionMatch_If_Else.setEnabled(False)
+        self.main_window.actionMatch_Sequence.setEnabled(False)
+        self.main_window.actionMatch_While.setEnabled(False)
+        self.main_window.actionMatch_Single_BB_While.setEnabled(False)
+        self.main_window.actionMatch_Do_While.setEnabled(False)
+        self.main_window.actionMatch_Early_Return.setEnabled(False)
+        self.main_window.actionMatch_Multi_If.setEnabled(False)
+        self.main_window.actionDuplicate_Exit_Node.setEnabled(False)
+        self.main_window.actionMatch_Infinite_Loop.setEnabled(False)
+        self.main_window.actionMatch_Switch.setEnabled(False)
+
+        if cfg_node is None: return
+        if self.main_window.selected_func is None: return
+        if self.main_window.selected_func.ufunction is None: return
+        if self.main_window.selected_func.ufunction.cfg is None: return
+
+        self.main_window.actionMatch_If.setEnabled(self.main_window.selected_func.ufunction.cfg.convert_if(cfg_node, True))
+        self.main_window.actionMatch_If_Else.setEnabled(self.main_window.selected_func.ufunction.cfg.convert_if_else(cfg_node, True))
+        self.main_window.actionMatch_Sequence.setEnabled(self.main_window.selected_func.ufunction.cfg.convert_sequence(cfg_node, True))
+        self.main_window.actionMatch_While.setEnabled(self.main_window.selected_func.ufunction.cfg.convert_while(cfg_node, True))
+        self.main_window.actionMatch_Single_BB_While.setEnabled(self.main_window.selected_func.ufunction.cfg.convert_single_bb_while(cfg_node, True))
+        self.main_window.actionMatch_Do_While.setEnabled(self.main_window.selected_func.ufunction.cfg.convert_do_while(cfg_node, True))
+        self.main_window.actionMatch_Early_Return.setEnabled(self.main_window.selected_func.ufunction.cfg.convert_early_return(cfg_node, True))
+        self.main_window.actionMatch_Multi_If.setEnabled(self.main_window.selected_func.ufunction.cfg.convert_multi_if(cfg_node, True))
+        self.main_window.actionDuplicate_Exit_Node.setEnabled(self.main_window.selected_func.ufunction.cfg.convert_duplicate_exit_node(cfg_node, True))
+        self.main_window.actionMatch_Infinite_Loop.setEnabled(self.main_window.selected_func.ufunction.cfg.convert_infinite_loop(cfg_node, True))
+        self.main_window.actionMatch_Switch.setEnabled(self.main_window.selected_func.ufunction.cfg.convert_switch(cfg_node, True))
+
+    def hide_disabled_item_from_toolbar(self):
+        found = False
+        spacer = None
+        for action in self.toolbar.actions():
+            if isinstance(action, QWidgetAction):
+                spacer = action
+                break
+            if found:
+                self.toolbar.removeAction(action)
+            if action == self.auto_action:
+                found = True
+        found = False
+        for action in self.original_actions:
+            if action == spacer:
+                break
+            if found:
+                if action.isEnabled():
+                    self.toolbar.insertAction(spacer, action)
+            if action == self.auto_action:
+                found = True
+
+    def move_up(self):
+        pass
+
+    def move_down(self):
+        pass
+
+    def detect_patterns(self):
+        if self.main_window.current_tab() == self.main_window.TAB_BASIC_BLOCKS:
+            func = self.main_window.selected_func
+            if not func: return
+            self.main_window.undo_manager.pre_action(func, "Detect and Eliminate Patterns")
+            if len(func.patterns) == 0:
+                pattern = func.arch.sema.detect_pattern(func)
+                if not pattern: return
+                func.patterns.append(pattern)
+            else:
+                p = func.patterns[0]
+                del func.patterns[0]
+                func.arch.sema.remove_pattern(func, p)
+            self.main_window.undo_manager.post_action()
+            self.main_window.reload_func()
+        elif self.main_window.current_tab() == self.main_window.TAB_UCODE:
+            self.ucode_patterns()
+
+    def eliminate(self):
+        if self.main_window.current_tab() == self.main_window.TAB_UCODE:
+            self.eliminate_ucode()
+
+    def generate_bbs(self):
+        func = self.main_window.selected_func
+        if not func: return
+
+        self.main_window.undo_manager.pre_action(func, "Remove Patterns and Strip Basic Blocks")
+        auto_build_bbs(func)
+        auto_transform_bbs(func)
+
+        self.main_window.undo_manager.post_action()
+        self.main_window.reload_func()
+        self.main_window.goto_tab(self.main_window.TAB_BASIC_BLOCKS)
+
+    def generate_ucode(self):
+        func = self.main_window.selected_func
+        if not func: return
+
+        builder = UCodeBuilder(func)
+        builder.build_ucode()
+
+        self.main_window.reload_func()
+        self.main_window.goto_tab(self.main_window.TAB_UCODE)
+
+    def generate_cfg(self):
+        func = self.main_window.selected_func
+        if not func: return
+
+        func.ufunction.cfg = CFGGraph(func.ufunction)
+
+        self.main_window.reload_func()
+        self.main_window.goto_tab(self.main_window.TAB_CFG)
+
+    def generate_source(self):
+        func = self.main_window.selected_func
+        if not func: return
+
+        if not func.can_build_ast(): return
+
+        func.build_ast()
+
+        self.main_window.reload_func()
+        self.main_window.goto_tab(self.main_window.TAB_SOURCE)
+
+    def strip_nops(self):
+        if self.main_window.current_tab() == self.main_window.TAB_DISASSEMBLY:
+            func = self.main_window.selected_func
+            StripNops(func).run()
+            self.main_window.reload_func()
+        elif self.main_window.current_tab() == self.main_window.TAB_UCODE:
+            func = self.main_window.selected_func
+            self.main_window.undo_manager.pre_action(func, "Strip NOPs")
+            UCodeApplyBasicBlockTransformToAll(func.ufunction, UCodeRemoveNopsFromBasicBlock).perform()
+            self.main_window.undo_manager.post_action()
+            self.main_window.reload_func()
+
+    def strip_bbs(self):
+        func = self.main_window.selected_func
+        self.main_window.undo_manager.pre_action(func, "Strip BBs")
+        RemoveUnreachableBasicBlocks(func).run()
+        JoinLinearBasicBlocks(func).run()
+        self.main_window.undo_manager.post_action()
+        self.main_window.reload_func()
+
+    def de_spill(self):
+        func = self.main_window.selected_func
+        self.main_window.undo_manager.pre_action(func, "De-Spill")
+        UCodeApplyBasicBlockTransformToAll(func.ufunction, UCodeConvertStackVariablesToRegisters).perform()
+
+        func.ufunction.compute_def_use_chains()
+        t = UCodeApplyInstructionTransformToAll(func.ufunction, UCodeStackArgumentsToRegisters)
+        t.binary = func.binary
+        t.perform()
+
+        self.main_window.undo_manager.post_action()
+        self.main_window.reload_func()
+
+    def propagate(self):
+        func = self.main_window.selected_func
+        self.main_window.undo_manager.pre_action(func, "Propagate Constants")
+        func.ufunction.compute_def_use_chains()
+        UCodeApplyInstructionTransformToAll(func.ufunction, UCodeCopyPropagateInstruction).perform()
+        self.main_window.undo_manager.post_action()
+        self.main_window.reload_func()
+
+    def simplify(self):
+        func = self.main_window.selected_func
+        self.main_window.undo_manager.pre_action(func, "Simplify")
+        UCodeApplyInstructionTransformToAll(func.ufunction, UCodeRemovePCReferences).perform()
+        UCodeApplyInstructionTransformToAll(func.ufunction, UCodeConstantFoldInstruction).perform()
+        UCodeApplyInstructionTransformToAll(func.ufunction, UCodeRemoveUselessMoves).perform()
+        func.ufunction.compute_def_use_chains()
+        UCodeApplyInstructionTransformToAll(func.ufunction, UCodeFoldArithmeticChains).perform()
+        func.ufunction.compute_def_use_chains()
+        UCodeApplyInstructionTransformToAll(func.ufunction, UCodeRemoveUnusedCallResults).perform()
+        #UCodeConstantFolding(func).run()
+        #UCodeRemoveNops(func).run()
+        #UCodeRemovePCReferences(func).run()
+        self.main_window.undo_manager.post_action()
+        self.main_window.reload_func()
+
+    def eliminate_ucode(self):
+        func = self.main_window.selected_func
+        self.main_window.undo_manager.pre_action(func, "Eliminate Dead Code")
+        #UCodeElimination(func).run()
+        func.ufunction.compute_def_use_chains()
+        UCodeApplyInstructionTransformToAll(func.ufunction, UCodeDeadCodeEliminateInstruction).perform()
+        self.main_window.undo_manager.post_action()
+        self.main_window.reload_func()
+
+    def ucode_patterns(self):
+        func = self.main_window.selected_func
+        self.main_window.undo_manager.pre_action(func, "Apply Patterns")
+        func.ufunction.compute_def_use_chains()
+        UCodeApplyBasicBlockTransformToAll(func.ufunction, UCodeDetectPattern1).perform()
+        func.ufunction.compute_def_use_chains()
+        UCodeApplyBasicBlockTransformToAll(func.ufunction, UCodeDetectPattern2).perform()
+        self.main_window.undo_manager.post_action()
+        self.main_window.reload_func()
+
+    def arc(self):
+        func = self.main_window.selected_func
+        self.main_window.undo_manager.pre_action(func, "Apply ARC")
+        UCodeApplyInstructionTransformToAll(func.ufunction, UCodeRemoveRetainRelease).perform()
+        self.main_window.undo_manager.post_action()
+        self.main_window.reload_func()
+
+    def resolve(self):
+        func = self.main_window.selected_func
+        self.main_window.undo_manager.pre_action(func, "Resolve Symbols")
+
+        transforms.resolve(func)
+
+        self.main_window.undo_manager.post_action()
+        self.main_window.reload_func()
+
+    def instruction_action(self, action):
+        def f():
+            func = self.main_window.selected_func
+            uinstr = self.main_window.selected_uinstruction
+            self.main_window.undo_manager.pre_action(func, action.name)
+            action(func.ufunction, uinstr).perform()
+            self.main_window.undo_manager.post_action()
+            self.main_window.reload_ucode()
+        return f
+
+    def set_progress(self, s, value=None):
+        if value is not None:
+            s += " %.2f%%" % (value * 100)
+            self.progress_dialog.setValue(int(value * 100))
+        else:
+            # Some super fake progress
+            v = self.progress_dialog.value()
+            v = int((v + 99) / 2)
+            self.progress_dialog.setValue(v)
+
+        self.progress_dialog.setLabelText(s)
+        QCoreApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
+        QCoreApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
+
+    def auto_on_function(self, func):
+        self.set_progress("Disassembling...", 0.00)
+        func.load()
+        self.set_progress("Building basic blocks...", 0.10)
+        auto_build_bbs(func)
+        self.set_progress("Transforming low-level architecture idioms...", 0.20)
+        auto_transform_bbs(func)
+        self.set_progress("Generating uCode...", 0.30)
+        builder = UCodeBuilder(func)
+        builder.build_ucode()
+        self.set_progress("Optimizing uCode...", 0.40)
+        auto_transform_ucode(func, single_step=False)
+        func.ufunction.cfg = CFGGraph(func.ufunction)
+        self.set_progress("Generating CFG...", 0.60)
+        auto_match_cfg(func, single_step=False)
+        self.set_progress("Building AST...", 0.80)
+        func.build_ast()
+        self.set_progress("Optimizing AST...", 0.90)
+        auto_optimize_ast(func)
+
+    def auto(self):
+        func = self.main_window.selected_func
+        if func is None: return
+
+        self.progress_dialog = QProgressDialog("                    Decompiling function...                ", None, 0, 100)
+        self.progress_dialog.forceShow()
+        QCoreApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
+
+        self.main_window.undo_manager.pre_action(func, "Auto")
+
+        bd = func.binary.find_block_descriptor_for_function(func)
+        if bd is not None:
+            self.set_progress("Decompiling block 1 of 1...", 0.20)
+            block_func = bd.uses[0].invoke_func
+            self.auto_on_function(block_func)
+
+        self.auto_on_function(func)
+
+        self.main_window.undo_manager.post_action()
+
+        self.main_window.reload_func()
+        self.main_window.goto_tab(self.main_window.TAB_SOURCE)
+
+        self.progress_dialog.close()
+
+    def auto_step(self):
+        if self.main_window.current_tab() == self.main_window.TAB_UCODE:
+            func = self.main_window.selected_func
+            self.main_window.undo_manager.pre_action(func, "Auto")
+
+            auto_transform_ucode(func, single_step=False)
+            """
+            self.simplify()
+            self.propagate()
+            self.eliminate_ucode()
+            self.de_spill()
+            self.resolve()
+            self.ucode_patterns()
+            self.simplify()
+            self.eliminate_ucode()
+            self.strip_nops()
+            self.arc()
+            """
+
+            self.main_window.undo_manager.post_action()
+            self.main_window.reload_func()
+
+        if self.main_window.current_tab() == self.main_window.TAB_CFG:
+            func = self.main_window.selected_func
+            self.main_window.undo_manager.pre_action(func, "Auto")
+            auto_match_cfg(func, single_step=False)
+            self.main_window.undo_manager.post_action()
+            self.main_window.reload_ucode_cfg(func)
+
+    def ucode_show_details(self):
+        checked = self.main_window.actionShow_uCode_Generation_Details.isChecked()
+        self.main_window.show_ucode_details = checked
+        self.main_window.reload_func()
+
+    def ucode_show_def_use(self):
+        checked = self.main_window.actionShow_Def_Use_Chains.isChecked()
+        self.main_window.show_ucode_def_use = checked
+        self.main_window.reload_func()
+
+    def cfg_convert_if(self):
+        node = self.main_window.selected_cfg_node
+        if node is None: return
+        self.main_window.selected_func.ufunction.cfg.convert_if(node)
+        self.main_window.reload_func()
+
+    def cfg_convert_if_else(self):
+        node = self.main_window.selected_cfg_node
+        if node is None: return
+        self.main_window.selected_func.ufunction.cfg.convert_if_else(node)
+        self.main_window.reload_func()
+
+    def cfg_convert_sequence(self):
+        node = self.main_window.selected_cfg_node
+        if node is None: return
+        self.main_window.selected_func.ufunction.cfg.convert_sequence(node)
+        self.main_window.reload_func()
+
+    def cfg_convert_while(self):
+        node = self.main_window.selected_cfg_node
+        if node is None: return
+        self.main_window.selected_func.ufunction.cfg.convert_while(node)
+        self.main_window.reload_func()
+
+    def cfg_convert_single_bb_while(self):
+        node = self.main_window.selected_cfg_node
+        if node is None: return
+        self.main_window.selected_func.ufunction.cfg.convert_single_bb_while(node)
+        self.main_window.reload_func()
+
+    def cfg_convert_do_while(self):
+        node = self.main_window.selected_cfg_node
+        if node is None: return
+        self.main_window.selected_func.ufunction.cfg.convert_do_while(node)
+        self.main_window.reload_func()
+
+    def cfg_convert_early_return(self):
+        node = self.main_window.selected_cfg_node
+        if node is None: return
+        self.main_window.selected_func.ufunction.cfg.convert_early_return(node)
+        self.main_window.reload_func()
+
+    def cfg_convert_multi_if(self):
+        node = self.main_window.selected_cfg_node
+        if node is None: return
+        self.main_window.selected_func.ufunction.cfg.convert_multi_if(node)
+        self.main_window.reload_func()
+
+    def cfg_convert_duplicate_exit_node(self):
+        node = self.main_window.selected_cfg_node
+        if node is None: return
+        self.main_window.selected_func.ufunction.cfg.convert_duplicate_exit_node(node)
+        self.main_window.reload_func()
+
+    def cfg_convert_infinite_loop(self):
+        node = self.main_window.selected_cfg_node
+        if node is None: return
+        self.main_window.selected_func.ufunction.cfg.convert_infinite_loop(node)
+        self.main_window.reload_func()
+
+    def cfg_convert_switch(self):
+        node = self.main_window.selected_cfg_node
+        if node is None: return
+        self.main_window.selected_func.ufunction.cfg.convert_switch(node)
+        self.main_window.reload_func()
+
+    def tab_is_source(self):
+        return self.main_window.current_tab() == self.main_window.TAB_SOURCE
+
+    @MenuAction(qt_action_name="actionRewrite_Ivar_Loads", enabled_method=tab_is_source)
+    def ast_rewrite_ivar_loads(self):
+        IvarLoadRewriter(self.main_window.selected_func.ast).rewrite()
+        self.main_window.reload_func()
+
+    @MenuAction(qt_action_name="actionRewrite_Ivar_Stores", enabled_method=tab_is_source)
+    def ast_rewrite_ivar_stores(self):
+        IvarStoreRewriter(self.main_window.selected_func.ast).rewrite()
+        self.main_window.reload_func()
+
+    @MenuAction(qt_action_name="actionRewrite_objc_msgSend", enabled_method=tab_is_source)
+    def ast_rewrite_objc_msgsend(self):
+        MsgSendRewriter(self.main_window.selected_func.ast).rewrite()
+        self.main_window.reload_func()
+
+    @MenuAction(qt_action_name="actionEmbed_Blocks", enabled_method=tab_is_source)
+    def ast_embed_blocks(self):
+        EmbedBlocksRewriter(self.main_window.selected_func.ast).rewrite()
+        self.main_window.reload_func()
+
+    @MenuAction(qt_action_name="actionSimplify_Source", enabled_method=tab_is_source)
+    def ast_simplify_source(self):
+        SimplifySourceRewriter(self.main_window.selected_func.ast).rewrite()
+        self.main_window.reload_func()
+
+    @MenuAction(qt_action_name="actionFix_Types", enabled_method=tab_is_source)
+    def ast_fix_types(self):
+        TypeRewriter(self.main_window.selected_func.ast).rewrite()
+        self.main_window.reload_func()
+
+
+    def can_start_profiling(self):
+        return not self.main_window.app.profiling_enabled
+
+    @MenuAction(qt_action_name="actionStart_profiling", enabled_method=can_start_profiling)
+    def start_profiling(self):
+        self.main_window.app.start_profiling()
+        self.enable_and_disable_actions()
+
+    def can_stop_profiling(self):
+        return self.main_window.app.profiling_enabled
+
+    @MenuAction(qt_action_name="actionStop_profiling", enabled_method=can_stop_profiling)
+    def stop_profiling(self):
+        self.main_window.app.stop_profiling()
+        self.enable_and_disable_actions()
+
+    def can_print_profiling_stats(self):
+        return self.main_window.app.profiling_has_results
+
+    @MenuAction(qt_action_name="actionPrint_profiling_stats", enabled_method=can_print_profiling_stats)
+    def print_profiling_stats(self):
+        self.main_window.app.print_profiling_stats_and_clear()
+        self.enable_and_disable_actions()

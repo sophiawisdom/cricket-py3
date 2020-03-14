@@ -1,0 +1,111 @@
+from abc import abstractmethod
+
+
+
+
+class FunctionPass:
+    def __init__(self, function):
+        self.function = function
+        self.arch = function.arch
+
+    @abstractmethod
+    def run(self):
+        assert False
+
+
+class InstructionsPass(FunctionPass):
+    @abstractmethod
+    def run(self):
+        assert False
+
+
+class StripTrailingNops(InstructionsPass):
+    def run(self):
+        idx = len(self.function.instructions)
+        while self.arch.sema.is_nop(self.function.instructions[idx-1]):
+            idx -= 1
+        self.function.instructions = self.function.instructions[0:idx]
+
+
+class StripNops(InstructionsPass):
+    def run(self):
+        self.function.instructions = [instr for instr in self.function.instructions if not self.arch.sema.is_nop(instr)]
+
+        # assert self.function.bbs
+        # for bb in self.function.bbs:
+        #     bb.instructions = [instr for instr in bb.instructions if not self.arch.sema.is_nop(instr)]
+
+
+class RemoveEmptyBasicBlocks(FunctionPass):
+    def run(self):
+        assert self.function.bbs
+
+        while True:
+            for idx, bb in enumerate(self.function.bbs):
+                if len(bb.instructions) == 0:
+                    for pred_bb in bb.preds:
+                        # TODO
+                        assert False
+                        assert bb in pred_bb.succs
+                        pred_bb.succs -= set(bb)
+                        pred_bb.succs += bb.succs
+                    for succ_bb in bb.succs:
+                        # TODO
+                        assert False
+                        assert bb in succ_bb.preds
+                        succ_bb.preds -= set(bb)
+                        succ_bb.preds += bb.preds
+                    del self.function.bbs[idx]
+                    continue
+
+            break
+
+        # TODO: renumber BBs
+
+
+class RemoveCCPrologueEpilogue(FunctionPass):
+    def run(self):
+        while True:
+            cc = self.arch.sema.detect_pattern(self.function)
+            if not cc: break
+            print cc
+            self.arch.sema.remove_pattern(self.function, cc)
+
+
+class RemoveUnreachableBasicBlocks(FunctionPass):
+    def run(self):
+        assert self.function.bbs
+
+        for idx, bb in enumerate(self.function.bbs):
+            # TODO graph reachability. Currently only remove blocks with no predecessors.
+            bb = self.function.bbs[idx]
+            if not bb.is_entry and len(bb.preds) == 0:
+                del(self.function.bbs[idx])
+                for succ_bb in bb.succs:
+                    succ_bb.preds.remove(bb)
+
+        # TODO: renumber BBs
+
+
+class JoinLinearBasicBlocks(FunctionPass):
+    def run(self):
+        assert self.function.bbs
+
+        keep_going = True
+        while keep_going:
+            keep_going = False
+            for idx, bb in enumerate(self.function.bbs):
+                bb = self.function.bbs[idx]
+                if len(bb.preds) == 1:
+                    pred = list(bb.preds)[0]
+                    if len(pred.succs) == 1:
+                        # bb.pred <=> bb
+                        pred.instructions += bb.instructions
+                        for instr in bb.instructions: instr.bb = pred
+                        pred.succs = bb.succs
+                        del self.function.bbs[idx]
+
+                        keep_going = True
+                        break
+
+        # TODO: renumber BBs

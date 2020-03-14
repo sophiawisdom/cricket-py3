@@ -1,0 +1,309 @@
+from struct import unpack
+
+from analysis.asm.assembly import AssemblyDataInstruction
+
+
+class BasicBlock():
+    def __init__(self, arch, function, number, addr, instructions):
+        self.arch = arch
+        self.function = function
+        self.number = number
+        self.addr = addr
+        self.instructions = instructions
+        for instr in instructions:
+            instr.bb = self
+        self.succs = set()
+        self.preds = set()
+        self.has_terminator = False
+        self.is_entry = None
+        self.is_exit = None
+
+    def __str__(self):
+        def indexes(bbs):
+            return "[" + ",".join(str(bb.number) for bb in bbs) + "]"
+
+        ee = ""
+        if self.is_entry: ee = "[entry]"
+        if self.is_exit: ee = "[exit]"
+        return "BB#%d%s, succs: %s, preds: %s." % (
+            self.number, ee, indexes(self.succs), indexes(self.preds))
+
+    def __repr__(self):
+        return str(self)
+
+    def get_terminator(self):
+        assert self.has_terminator
+        return self.instructions[-1]
+
+
+def fill_terminators(arch, bbs):
+    for idx, bb in enumerate(bbs):
+        last_instr = bb.instructions[len(bb.instructions) - 1]
+        if arch.sema.is_unconditional_jump(last_instr) or arch.sema.is_conditional_jump(
+                last_instr) or arch.sema.is_return(last_instr):
+            bb.has_terminator = True
+
+
+def fill_preds_and_succs(arch, bbs):
+    targets = {}
+    for idx, bb in enumerate(bbs):
+        assert bb.number == idx
+        assert bb.addr not in targets
+        targets[bb.addr] = bb
+
+    reachable_bbs = [bbs[0]]
+
+    for idx, bb in enumerate(bbs):
+        assert bb.number == idx
+        assert len(bb.instructions) > 0
+        last_instr = bb.instructions[len(bb.instructions) - 1]
+        if last_instr.jump_table is not None:
+            assert arch.sema.is_unconditional_jump(last_instr)
+            bb.succs = set([targets[a] for a in last_instr.jump_table])
+        elif arch.sema.is_unconditional_jump(last_instr):
+            jump_destination = arch.sema.jump_destination(last_instr)
+            if jump_destination is None:
+                # "JMP RAX". Either a switch, or a tail-call. TODO. Now treat it as a tail-call.
+                bb.is_exit = True
+            elif jump_destination in list(targets.keys()):
+                # Jump into another BB.
+                bb.succs = set([targets[jump_destination]])
+            else:
+                # Huh, just outside of the function? Probably a tail-call.
+                bb.is_exit = True
+        elif arch.sema.is_conditional_jump(last_instr):
+            bb.succs = set()
+            jump_destination = arch.sema.jump_destination(last_instr)
+            if jump_destination not in list(targets.keys()):
+                # Conditional jump outside of the function? Wut?
+                assert False
+            bb.succs.add(targets[jump_destination])
+            bb.succs.add(targets[last_instr.addr + len(last_instr.bytes)])
+        elif arch.sema.is_return(last_instr):
+            bb.is_exit = True
+            bb.succs = set()
+        else:
+            if bb not in reachable_bbs and bb.number == len(bbs) - 1:
+                # Unreachable BB that is last? Probably padding or NOPs.
+                continue
+
+            if idx + 1 < len(bbs):
+                # Fall-through
+                bb.succs = set([bbs[idx + 1]])
+            else:
+                # ?? Weird last BB.  Maybe a no-return tail call?
+                bb.is_exit = True
+                pass
+
+
+        for succ_bb in bb.succs:
+            if not succ_bb in reachable_bbs:
+                reachable_bbs.append(succ_bb)
+
+    for idx, bb in enumerate(bbs):
+        for succ_bb in bb.succs:
+            assert bb not in succ_bb.preds
+            succ_bb.preds.add(bb)
+
+
+def detect_bb_beginnings_and_function_end(arch, instructions, initial_bb_beginnings=set()):
+    max_addr = instructions[-1].addr + len(instructions[-1].bytes)
+    bb_beginnings = set(initial_bb_beginnings)
+    idx = 0
+    func_end = 0
+    while idx < len(instructions):
+        instr = instructions[idx]
+        func_end = instr.addr + len(instr.bytes)
+        if arch.sema.is_jump(instr):
+            if len(instructions) > idx:
+                if arch.sema.is_conditional_jump(instr):
+                    if len(instructions) > idx + 1:
+                        if instructions[idx + 1].addr < max_addr:
+                            bb_beginnings.add(instructions[idx + 1].addr)
+                jump_destination = arch.sema.jump_destination(instr)
+                if jump_destination is not None:
+                    if jump_destination < max_addr:
+                        bb_beginnings.add(jump_destination)
+
+        if arch.sema.is_unconditional_jump(instr) or arch.sema.is_return(instr):
+            if all(a < instr.addr for a in bb_beginnings):
+                func_end = instr.addr + len(instr.bytes)
+                break
+        idx += 1
+    return (bb_beginnings, func_end)
+
+
+def detect_function_end_from_bb_beginnings(func):
+    (bb_beginnings, func_end) = detect_bb_beginnings_and_function_end(func.arch, func.instructions, func.bb_beginnings)
+    func.bb_beginnings = bb_beginnings
+    func.func_end = func_end
+
+
+def convert_stuff_beyond_end_to_data(func):
+    idx = 0
+    func_end = func.func_end
+    while idx < len(func.instructions):
+        if func.instructions[idx].addr >= func_end:
+            break
+        idx += 1
+
+    class AnyObject(object):
+        pass
+
+    instrs = func.instructions[idx:]
+    output_instrs = []
+    for instr in instrs:
+        if isinstance(instr, AssemblyDataInstruction):
+            output_instrs.append(instr)
+        else:
+            addr = instr.addr
+            for b in instr.bytes:
+                instr = AssemblyDataInstruction(func.arch, addr, b, "db", "0x%x" % b)
+                instr.csinstr = AnyObject()
+                instr.csinstr.mnemonic = "db"
+                instr.csinstr.id = -1
+                instr.csinstr.groups = []
+                instr.csinstr.operands = []
+                instr.csinstr.op_str = "0x%x" % b
+                instr.canonicalsyntax = "%s %s" % ("db", "0x%x" % b)
+                output_instrs.append(instr)
+                addr += 1
+
+    func.instructions[idx:] = output_instrs
+
+
+def detect_jump_tables(func):
+    data_start = func.func_end
+    data_end = func.addr + func.len
+    rel_data_start = data_start - func.addr
+    data_len = data_end - data_start
+
+    if data_len <= 0: return
+
+    data_bytes = func.bytes[rel_data_start:]
+
+    jump_tables = {}
+    jump_tables_ptr = {}
+
+    for (idx, instr) in enumerate(func.instructions):
+        lookahead = [a.csinstr for a in func.instructions[idx+1:idx+2]] if len(func.instructions) > idx+1 else []
+        ptrs = func.arch.sema.guess_pointers(instr.csinstr, lookahead, data_start, data_end)
+
+        if instr.pointer_hints is not None: ptrs += instr.pointer_hints
+        ptrs = [ptr for ptr in ptrs if data_start <= ptr < data_end]
+
+        for ptr in ptrs:
+            jump_table = retrieve_jump_table(func, data_bytes, data_start, ptr)
+            if jump_table is not None:
+                jump_tables[ptr] = jump_table
+
+    s = sorted(jump_tables.keys())
+    for (idx, jump_table_start) in enumerate(s):
+        if idx + 1 >= len(s): break
+        max_entries = (s[idx + 1] - s[idx]) / 4
+        jump_tables[jump_table_start] = jump_tables[jump_table_start][0:max_entries]
+
+    for (ptr, jump_table) in list(jump_tables.items()):
+        is_negative = all(entry < 0 for entry in jump_table)
+        is_positive = all(entry > 0 for entry in jump_table)
+
+        if is_negative:
+            # Negative offsets? Let's assume their offsets from the beginning of the jump table.
+            to_add = ptr
+        elif is_positive:
+            # Positive offsets? Let's assume they're from PIC base.
+            to_add = func.pic_info[1]  # PIC base value.
+        else:
+            assert False
+
+        jump_tables_ptr[ptr] = []
+        for entry in jump_table:
+            bb_beginning = entry + to_add
+            func.bb_beginnings.add(bb_beginning)
+            jump_tables_ptr[ptr].append(bb_beginning)
+
+    jump_points = func.arch.sema.match_switch_jump_points(func.instructions)
+    # print jump_tables
+    # print jump_points
+
+    sorted_jump_tables = []
+    for key in sorted(jump_tables_ptr):
+        sorted_jump_tables.append(jump_tables_ptr[key])
+
+    assert len(sorted_jump_tables) == len(jump_points)
+    for (idx, jump_point) in enumerate(jump_points):
+        jump_point_instr, jump_point_register = jump_point
+        jump_point_instr.jump_table = sorted_jump_tables[idx]
+        jump_point_instr.jump_table_index_register = jump_point_register
+
+    # func.detect_basic_blocks()
+
+
+def retrieve_jump_table(func, data_bytes, data_start, ptr):
+    rel_ptr = ptr - data_start
+    l = len(data_bytes)
+    if rel_ptr < 0 or rel_ptr >= l: return False
+
+    data_bytes = data_bytes[rel_ptr:]
+    l = len(data_bytes)
+    if l < 3 * 4: return None  # We expect at least 3 jump table entries.
+
+    offset = 0
+    entries = []
+    while True:
+        if offset >= l: break
+        if offset + 4 > l: break
+        jump_entry = unpack("i", data_bytes[offset:offset + 4])[0]
+        if jump_entry >= -0x10000 and jump_entry <= 0x10000:
+            entries.append(jump_entry)
+        else:
+            break
+
+        offset += 4
+
+    if len(entries) < 3: return None
+
+    return entries
+
+
+def detect_basic_blocks(func, arch, instructions):
+    bbs = []
+
+    bb_beginnings = func.bb_beginnings
+    func_end = func.func_end
+    assert bb_beginnings is not None
+    assert func_end is not None
+
+    bb_index = 0
+    bb_instructions = []
+    idx = 0
+    while idx < len(instructions):
+        instr = instructions[idx]
+
+        if isinstance(instr, AssemblyDataInstruction):
+            idx += 1
+            continue
+
+        if instr.addr in bb_beginnings and len(bb_instructions) > 0:
+            bb = BasicBlock(arch, func, bb_index, bb_instructions[0].addr, bb_instructions)
+            bb_index += 1
+            bb.is_entry = False
+            bb.is_exit = False
+            bbs.append(bb)
+            bb_instructions = []
+
+        bb_instructions.append(instr)
+        idx += 1
+
+    if len(bb_instructions) > 0:
+        bb = BasicBlock(arch, func, bb_index, bb_instructions[0].addr, bb_instructions)
+        bb_index += 1
+        bb.is_entry = False
+        bb.is_exit = False
+        bbs.append(bb)
+
+    bbs[0].is_entry = True
+    fill_preds_and_succs(arch, bbs)
+    fill_terminators(arch, bbs)
+
+    return bbs
