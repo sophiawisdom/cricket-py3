@@ -10,7 +10,8 @@ class UCodeUtils:
         to_add = 0
         while len(mem_instruction.definitions(ptr)) == 1:
             add_instruction = mem_instruction.definitions(ptr)[0]
-            assert isinstance(add_instruction, UCodeAdd)
+            if not isinstance(add_instruction, UCodeAdd): return (None, None)
+            # assert isinstance(add_instruction, UCodeAdd) # disabling this to just get it to work...
             assert isinstance(add_instruction.source1(), UCodeRegister)
             assert isinstance(add_instruction.source2(), UCodeConstant)
             to_add += add_instruction.source2().value

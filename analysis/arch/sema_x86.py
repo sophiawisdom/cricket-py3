@@ -28,25 +28,32 @@ class SemaX86(Sema):
         if not op.type == X86_OP_IMM: return None
         return op.imm
 
-    def guess_pointers(self, csinstr, lookahead, min_addr, max_addr):
+    def guess_pointers(self, csinstr, lookahead, min_addr, max_addr, visible=False):
         if csinstr.id == X86_INS_LEA:
+            if visible:
+                print("Instruction made it to step 1")
             assert csinstr.operands[0].type == X86_OP_REG
+            if visible:
+                print("Instruction made it to step 2")
             if csinstr.operands[1].type == X86_OP_IMM:
+                if visible:
+                    print("Instruction made it to step 2.25")
                 imm = csinstr.operands[1].imm
                 if imm >= min_addr and imm < max_addr:
                     return [imm]
-            if csinstr.operands[1].type == X86_OP_MEM:
+            elif csinstr.operands[1].type == X86_OP_MEM:
                 if csinstr.operands[1].mem.base != X86_REG_RIP: return []
                 if csinstr.operands[1].mem.index != X86_REG_INVALID: return []
                 imm = csinstr.address + csinstr.size + csinstr.operands[1].mem.disp
+                if visible:
+                    print(f"cond is {imm >= min_addr and imm < max_addr}. imm-max is {imm-max_addr}")
                 if imm >= min_addr and imm < max_addr:
                     return [imm]
-
         return []
 
     def looks_like_a_function_start(self, address, instructions):
         if len(instructions) < 2: return False  # Non-decodable instructions.
-
+            
         if instructions[0].mnemonic == "push" and re.match("^(r|e)bp$", instructions[0].op_str):
             if instructions[1].mnemonic == "mov" and re.match("^(r|e)bp, (r|e)sp$", instructions[1].op_str):
                 return True

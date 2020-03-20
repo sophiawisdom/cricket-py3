@@ -80,18 +80,26 @@ if __name__ == "__main__":
 
     func = method.function
     
-    print(f"Func is {func}. method is {method}")
-
     func.load()
+    print("Loaded func")
     auto_build_bbs(func)
+    print("built bbs")
     auto_transform_bbs(func)
+    print("transformed bbs")
     builder = UCodeBuilder(func)
+    print("instantiated ucodebuilder")
     builder.build_ucode()
+    print("built ucode")
     auto_transform_ucode(func, single_step=False)
+    print("transformed ucode")
     func.ufunction.cfg = CFGGraph(func.ufunction)
+    print("created cfg")
     auto_match_cfg(func, single_step=False)
+    print("matched cfg")
     func.build_ast()
+    print("built ast")
     auto_optimize_ast(func)
+    print("optimized ast")
 
     ast_string, _ = func.print_ast()
     print(ast_string)

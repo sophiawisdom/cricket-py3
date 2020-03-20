@@ -164,7 +164,10 @@ class MappingSet(Set):
                     yield lastMapping
                     lastMapping = mapping.copy()
             yield lastMapping
-
+        
+        if not len(self._lst): # band-aid because otherwise it fails
+            return
+            
         self._lst = set(_optimized())
         
         

@@ -414,8 +414,12 @@ class Binary:
 
     def lookup_block_invoke_addr(self, instrs):
         possible_ptrs = []
+        not_possible_ptrs = []
+        num_pointers = 0
         for i in instrs:
-            ptrs = self.arch.sema.guess_pointers(i, None, self.code_section_start, self.code_section_end)
+            ptrs = self.arch.sema.guess_pointers(i, None, self.code_section_start, self.code_section_end, False)
+            num_pointers += len(ptrs)
+            not_possible_ptrs.extend(ptrs)
             for ptr in ptrs:
                 if self.ptr_looks_like_a_function_start(ptr):
                     possible_ptrs.append(ptr)
@@ -424,7 +428,10 @@ class Binary:
             #print "Multiple possible block invoke functions:"
             #print possible_ptrs
             pass
-
+        
+        if len(possible_ptrs) == 0:
+            return not_possible_ptrs[0]
+            
         return possible_ptrs[0]
 
     def find_block_descriptor_for_function(self, function):
